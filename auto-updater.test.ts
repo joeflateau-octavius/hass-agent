@@ -1,35 +1,24 @@
 import {
-  afterAll,
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
   it,
-  mock,
-} from "bun:test";
+  vi,
+} from "vitest";
 import * as winston from "winston";
 import { AutoUpdater, type AutoUpdaterConfig } from "./auto-updater.ts";
 
-// Mock spawn
-const mockSpawn = mock();
+const mockSpawn = vi.hoisted(() => vi.fn());
+
+vi.mock("child_process", () => ({
+  spawn: mockSpawn,
+}));
 
 describe("AutoUpdater", () => {
   let logger: winston.Logger;
   let config: AutoUpdaterConfig;
   let autoUpdater: AutoUpdater;
-
-  beforeAll(() => {
-    // Set up module mocks
-    mock.module("child_process", () => ({
-      spawn: mockSpawn,
-    }));
-  });
-
-  afterAll(() => {
-    // Reset all mocks to prevent interference with other test files
-    mock.restore();
-  });
 
   beforeEach(() => {
     // Create a silent logger for testing
@@ -73,12 +62,12 @@ describe("AutoUpdater", () => {
     updater.stop();
   });
 
-  it("should start upgrade checks when conditions are met", (done) => {
+  it("should start upgrade checks when conditions are met", async () => {
     // Mock spawn to return a successful process
     const mockChild = {
-      stdout: { on: mock() },
-      stderr: { on: mock() },
-      on: mock((event, callback) => {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn((event, callback) => {
         if (event === "close") {
           // Simulate successful command execution
           setTimeout(() => callback(0), 10);
@@ -90,15 +79,15 @@ describe("AutoUpdater", () => {
 
     autoUpdater.start();
 
-    // Give it a moment to execute the initial check
-    setTimeout(() => {
-      expect(mockSpawn).toHaveBeenCalledWith(
-        "sh",
-        ["-c", expect.stringContaining("curl -fsSL")],
-        expect.any(Object)
-      );
-      done();
-    }, 50);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "sh",
+      ["-c", expect.stringContaining("curl -fsSL")],
+      expect.any(Object)
+    );
   });
 
   it("should stop upgrade checks when stop is called", () => {

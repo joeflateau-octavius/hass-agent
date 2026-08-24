@@ -1,5 +1,8 @@
 name: Build and Test
 
+env:
+  NODE_VERSION: 26.7.0
+
 on:
   push:
     branches: [main, develop]
@@ -14,52 +17,44 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
       - name: Install dependencies
-        run: bun install
+        run: npm ci
 
       - name: Run tests
         run: npm test
 
       - name: Type check
-        run: bun run tsc --noEmit
+        run: npm run typecheck
 
-      - name: Build executable
-        run: bun run build
-
-      - name: Build cross-platform executables
-        run: |
-          bun build --compile --minify --sourcemap ./index.ts --outfile hass-agent-arm64 --target bun-darwin-arm64
-          bun build --compile --minify --sourcemap ./index.ts --outfile hass-agent-x64 --target bun-darwin-x64
-          lipo -create -output hass-agent-universal hass-agent-arm64 hass-agent-x64
+      - name: Build signed macOS Node SEAs
+        run: scripts/build-macos-sea.sh
 
       - name: Verify executable
         run: |
-          echo "=== Default Build ==="
+          echo "=== Universal Binary ==="
           ls -la hass-agent
           file hass-agent
+          lipo -info hass-agent
+          codesign --verify --strict --verbose=2 hass-agent
           echo ""
-          echo "=== Cross-compiled ARM64 ==="
+          echo "=== ARM64 Binary ==="
           ls -la hass-agent-arm64
           file hass-agent-arm64
+          codesign --verify --strict --verbose=2 hass-agent-arm64
           echo ""
-          echo "=== Cross-compiled x64 ==="
+          echo "=== x64 Binary ==="
           ls -la hass-agent-x64
           file hass-agent-x64
-          echo ""
-          echo "=== Universal Binary ==="
-          ls -la hass-agent-universal
-          file hass-agent-universal
-          lipo -info hass-agent-universal
+          codesign --verify --strict --verbose=2 hass-agent-x64
 
-      - name: Test executable (dry run)
-        run: |
-          # Test that the executable runs without crashing
-          timeout 10s ./hass-agent --help || echo "Expected timeout or help output"
+      - name: Smoke test universal executable
+        run: ./hass-agent --help
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -70,5 +65,4 @@ jobs:
             hass-agent
             hass-agent-arm64
             hass-agent-x64
-            hass-agent-universal
           retention-days: 7

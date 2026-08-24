@@ -7,6 +7,7 @@
  */
 
 import * as winston from "winston";
+import { Agent } from "undici";
 import { z } from "zod";
 import { dataDragon } from "./data-dragon-loader.ts";
 import { Api } from "./lol-client/Api.ts";
@@ -355,20 +356,20 @@ export class LoLStatusReader {
   constructor(logger: winston.Logger) {
     this.logger = logger;
 
-    // Create custom fetch that ignores SSL certificate errors for the LoL client's self-signed cert
+    // The local League client uses a self-signed certificate. Scope the relaxed
+    // TLS policy to this loopback-only dispatcher rather than changing global TLS.
+    const loopbackDispatcher = new Agent({
+      connect: { rejectUnauthorized: false },
+    });
     const customFetch = async (
       url: string | URL | Request,
       init?: RequestInit
     ) => {
-      const options: RequestInit = {
+      const options = {
         ...init,
-        // In Bun, we can set the tls option to ignore certificate errors
-        // @ts-ignore - Bun-specific TLS option
-        tls: {
-          rejectUnauthorized: false,
-        },
+        dispatcher: loopbackDispatcher,
       };
-      return fetch(url, options);
+      return fetch(url, options as RequestInit);
     };
 
     this.api = new Api({

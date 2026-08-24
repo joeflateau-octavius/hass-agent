@@ -1,5 +1,8 @@
 name: Build and Release
 
+env:
+  NODE_VERSION: 26.7.0
+
 on:
   push:
     tags:
@@ -33,35 +36,25 @@ jobs:
             echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
       - name: Install dependencies
-        run: bun install
+        run: npm ci
 
       - name: Run tests
         run: npm test
 
-      - name: Build executable for Apple Silicon (arm64)
-        run: |
-          bun build --compile --minify --sourcemap ./index.ts --outfile hass-agent-arm64 --target bun-darwin-arm64 --define VERSION=\"${{ steps.version.outputs.VERSION }}\"
+      - name: Type check
+        run: npm run typecheck
 
-      - name: Build executable for Intel (x64)
-        run: |
-          bun build --compile --minify --sourcemap ./index.ts --outfile hass-agent-x64 --target bun-darwin-x64 --define VERSION=\"${{ steps.version.outputs.VERSION }}\"
-
-      - name: Create universal binary
-        run: |
-          lipo -create -output hass-agent hass-agent-arm64 hass-agent-x64
-          chmod +x hass-agent
-
-      - name: Sign executables
-        run: |
-          codesign --force --sign - hass-agent-arm64
-          codesign --force --sign - hass-agent-x64
-          codesign --force --sign - hass-agent
+      - name: Build signed macOS Node SEAs
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: scripts/build-macos-sea.sh
 
       - name: Verify executables
         run: |

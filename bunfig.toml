@@ -1,4 +1,0 @@
-[test]
-# Test configuration for Bun
-coverage = true
-coveragePathIgnorePatterns = ["lol-client/Api.ts"]

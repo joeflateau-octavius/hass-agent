@@ -5,7 +5,7 @@
  * shell. This keeps MQTT payloads from becoming an arbitrary command surface.
  */
 
-import { dlopen, FFIType } from "bun:ffi";
+import { dlopen } from "node:ffi";
 import { spawn } from "child_process";
 import type { MqttCommandDefinition } from "./mqtt-emitter.ts";
 
@@ -14,8 +14,8 @@ export const LOGIN_FRAMEWORK_PATH =
   "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login";
 const LOGIN_FRAMEWORK_SYMBOLS = {
   SACLockScreenImmediate: {
-    args: [],
-    returns: FFIType.i32,
+    arguments: [],
+    return: "i32",
   },
 } as const;
 
@@ -59,15 +59,18 @@ export async function runProcess(
 }
 
 export async function lockScreen(): Promise<void> {
-  const loginFramework = dlopen(LOGIN_FRAMEWORK_PATH, LOGIN_FRAMEWORK_SYMBOLS);
+  const { lib, functions } = dlopen(
+    LOGIN_FRAMEWORK_PATH,
+    LOGIN_FRAMEWORK_SYMBOLS
+  );
 
   try {
-    const result = loginFramework.symbols.SACLockScreenImmediate();
+    const result = functions.SACLockScreenImmediate();
     if (result !== 0) {
       throw new Error(`SACLockScreenImmediate failed with code ${result}`);
     }
   } finally {
-    loginFramework.close();
+    lib.close();
   }
 }
 
@@ -76,8 +79,8 @@ export async function lockScreen(): Promise<void> {
  * invoking it (which would lock the test runner).
  */
 export function verifyLockScreenSupport(): void {
-  const loginFramework = dlopen(LOGIN_FRAMEWORK_PATH, LOGIN_FRAMEWORK_SYMBOLS);
-  loginFramework.close();
+  const { lib } = dlopen(LOGIN_FRAMEWORK_PATH, LOGIN_FRAMEWORK_SYMBOLS);
+  lib.close();
 }
 
 export function createMacOSCommands(

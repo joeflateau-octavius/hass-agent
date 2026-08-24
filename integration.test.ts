@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 describe("MacOSPowerAgent Integration", () => {
   test("should create agent with valid config", () => {

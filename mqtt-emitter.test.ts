@@ -1,42 +1,44 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as winston from "winston";
 
 // Mock winston logger
 const mockLogger: winston.Logger = {
-  debug: mock(() => {}),
-  error: mock(() => {}),
-  info: mock(() => {}),
-  warn: mock(() => {}),
-  log: mock(() => {}),
+  debug: vi.fn(() => {}),
+  error: vi.fn(() => {}),
+  info: vi.fn(() => {}),
+  warn: vi.fn(() => {}),
+  log: vi.fn(() => {}),
 } as any;
 
-// Mock mqtt module
-const mockMqttClient = {
-  connected: false,
-  publish: mock(),
-  on: mock(),
-  once: mock(),
-  end: mock(),
-  subscribe: mock(),
-  options: {
-    reconnectPeriod: 5000,
-  },
-};
+const { mockMqttClient, mockMqttConnect, mockOs } = vi.hoisted(() => {
+  const mockMqttClient = {
+    connected: false,
+    publish: vi.fn(),
+    on: vi.fn(),
+    once: vi.fn(),
+    end: vi.fn(),
+    subscribe: vi.fn(),
+    options: {
+      reconnectPeriod: 5000,
+    },
+  };
 
-const mockMqttConnect = mock(() => mockMqttClient);
-
-// Mock os module
-const mockOs = {
-  release: mock(() => "23.1.0"),
-  hostname: mock(() => "test-hostname"),
-};
+  return {
+    mockMqttClient,
+    mockMqttConnect: vi.fn(() => mockMqttClient),
+    mockOs: {
+      release: vi.fn(() => "23.1.0"),
+      hostname: vi.fn(() => "test-hostname"),
+    },
+  };
+});
 
 // Set up module mocks before importing
-mock.module("mqtt", () => ({
+vi.mock("mqtt", () => ({
   connect: mockMqttConnect,
 }));
 
-mock.module("os", () => mockOs);
+vi.mock("os", () => mockOs);
 
 // Import after mocking
 import {
@@ -240,7 +242,7 @@ describe("MqttDeviceFramework", () => {
           id: "lock_screen",
           name: "Lock Screen",
           icon: "mdi:lock",
-          execute: mock(async () => {}),
+          execute: vi.fn(async () => {}),
         },
       ]);
 
@@ -274,7 +276,7 @@ describe("MqttDeviceFramework", () => {
         {
           id: "lock_screen",
           name: "Lock Screen",
-          execute: mock(async () => {}),
+          execute: vi.fn(async () => {}),
         },
       ]);
 
@@ -287,7 +289,7 @@ describe("MqttDeviceFramework", () => {
 
     it("executes allowlisted commands and publishes a result", async () => {
       const executed = Promise.withResolvers<void>();
-      const execute = mock(async () => {
+      const execute = vi.fn(async () => {
         executed.resolve();
       });
       framework.registerCommands([
@@ -323,7 +325,7 @@ describe("MqttDeviceFramework", () => {
     });
 
     it("ignores commands that are not allowlisted", async () => {
-      const execute = mock(async () => {});
+      const execute = vi.fn(async () => {});
       framework.registerCommands([
         {
           id: "lock_screen",
@@ -348,7 +350,7 @@ describe("MqttDeviceFramework", () => {
     });
 
     it("publishes failed command details without throwing", async () => {
-      const execute = mock(async () => {
+      const execute = vi.fn(async () => {
         throw new Error("Accessibility permission denied");
       });
       framework.registerCommands([
@@ -366,7 +368,7 @@ describe("MqttDeviceFramework", () => {
         "hass-agent/test-device/command",
         Buffer.from("lock_screen")
       );
-      await Bun.sleep(0);
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const resultCall = mockMqttClient.publish.mock.calls.find(
         (call: any[]) => call[0] === "hass-agent/test-device/command/result"
@@ -386,7 +388,7 @@ describe("MqttDeviceFramework", () => {
           {
             id: "lock screen",
             name: "Lock Screen",
-            execute: mock(async () => {}),
+            execute: vi.fn(async () => {}),
           },
         ])
       ).toThrow("Invalid MQTT command id");
@@ -395,7 +397,7 @@ describe("MqttDeviceFramework", () => {
         {
           id: "lock_screen",
           name: "Lock Screen",
-          execute: mock(async () => {}),
+          execute: vi.fn(async () => {}),
         },
       ]);
 
@@ -404,7 +406,7 @@ describe("MqttDeviceFramework", () => {
           {
             id: "lock_screen",
             name: "Lock Screen",
-            execute: mock(async () => {}),
+            execute: vi.fn(async () => {}),
           },
         ])
       ).toThrow("Duplicate MQTT command id");
@@ -426,7 +428,7 @@ describe("MqttDeviceFramework", () => {
     });
 
     it("does not execute a retired command", async () => {
-      const execute = mock(async () => {});
+      const execute = vi.fn(async () => {});
       framework.registerCommands([
         {
           id: "lock_screen",

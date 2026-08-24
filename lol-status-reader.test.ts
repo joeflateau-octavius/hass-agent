@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, vi, test } from "vitest";
 import * as winston from "winston";
 import { LoLStatusReader, type LoLGameStatus } from "./lol-status-reader.ts";
 
@@ -36,16 +36,16 @@ const mockChampionStats = {
 };
 
 // Mock the lol-client API
-const mockApi = {
+const mockApi = vi.hoisted(() => ({
   liveclientdata: {
-    getLiveclientdataGamestats: mock(),
-    getLiveclientdataActiveplayer: mock(),
-    getLiveclientdataPlayerlist: mock(),
+    getLiveclientdataGamestats: vi.fn(),
+    getLiveclientdataActiveplayer: vi.fn(),
+    getLiveclientdataPlayerlist: vi.fn(),
   },
-};
+}));
 
 // Mock the Api class
-mock.module("./lol-client/Api.ts", () => ({
+vi.mock("./lol-client/Api.ts", () => ({
   Api: class {
     liveclientdata = mockApi.liveclientdata;
     constructor() {}
@@ -459,7 +459,7 @@ describe("LoLStatusReader", () => {
   });
 
   test("should set and call update callback", async () => {
-    const updateCallback = mock<(status: LoLGameStatus) => void>();
+    const updateCallback = vi.fn<(status: LoLGameStatus) => void>();
 
     const reader = new LoLStatusReader(logger);
     reader.setStatusUpdateCallback(updateCallback);

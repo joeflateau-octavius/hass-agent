@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 /**
  * Main Application Entry Point
@@ -131,7 +131,7 @@ const envSchema = z.object({
     .default(() => (typeof VERSION !== "undefined" ? VERSION : "development")),
 });
 
-// Build-time version constant (will be replaced by bun build)
+// Build-time version constant (replaced while bundling the SEA)
 declare const VERSION: string;
 
 class MacOSPowerAgent {
