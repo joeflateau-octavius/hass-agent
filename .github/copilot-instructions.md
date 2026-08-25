@@ -2,15 +2,15 @@
 
 <!-- Use this file to provide workspace-specific custom instructions to Copilot. For more details, visit https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file -->
 
-This is a TypeScript/Bun project that creates a macOS system agent for Home Assistant integration.
+This is a TypeScript/Node.js project that creates a macOS system agent for Home Assistant integration.
 
 ## Project Overview
 
 - **Purpose**: Monitor macOS power and battery status and send data to Home Assistant via MQTT
-- **Runtime**: Bun with TypeScript
+- **Runtime**: Node.js 26.7.0 with TypeScript
 - **Target Platform**: macOS only
 - **Communication**: MQTT with Home Assistant Auto Discovery
-- **Build Target**: Single file executable using `bun build --compile`
+- **Build Target**: Signed Node.js Single Executable Application (SEA)
 
 ## Key Features
 
@@ -22,7 +22,10 @@ This is a TypeScript/Bun project that creates a macOS system agent for Home Assi
 
 ## Technical Constraints
 
-- Uses only native macOS commands (`pmset`, `system_profiler`)
+- Lock Screen must continue to call `SACLockScreenImmediate` from macOS
+  `login.framework` through `node:ffi`; do not replace it with AppleScript or
+  Accessibility automation.
+- Other macOS integration uses allowlisted native commands (`pmset`, `system_profiler`)
 - MQTT client must be compatible with Home Assistant discovery format
 - Must handle missing battery (desktop Macs) gracefully
 - Requires executable permissions for system commands
@@ -53,5 +56,5 @@ This is a TypeScript/Bun project that creates a macOS system agent for Home Assi
 
 - Always run tests after making code changes using the "Run Tests" VS Code task
 - Verify all tests pass before considering changes complete
-- Use `bun test` or the VS Code task to run the full test suite
+- Use `npm test` or the VS Code task to run the full test suite
 - Run these once you think you are finished, not for every step/edit

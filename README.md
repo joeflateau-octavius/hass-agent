@@ -1,6 +1,8 @@
 # macOS Home Assistant Agent
 
-A TypeScript/Bun single file executable that monitors macOS power and battery status and integrates with Home Assistant via MQTT with automatic device discovery.
+A TypeScript application packaged as a Node.js Single Executable Application
+that monitors macOS power and battery status and integrates with Home Assistant
+via MQTT with automatic device discovery.
 
 ## Features
 
@@ -11,16 +13,18 @@ A TypeScript/Bun single file executable that monitors macOS power and battery st
 - 🏠 **Home Assistant Integration**: Automatic device discovery via MQTT
 - 🎛️ **Remote Commands**: Allowlisted Home Assistant buttons for safe macOS actions
 - 📊 **Real-time Updates**: Configurable update intervals with adaptive polling
-- 🖥️ **macOS Native**: Uses system commands (`pmset`, `system_profiler`)
+- 🖥️ **macOS Native**: Uses system APIs and commands (`login.framework`, `pmset`, `system_profiler`)
 - 📦 **Single Executable**: Compiled to a single binary file
 - 🔄 **Graceful Shutdown**: Proper cleanup on termination signals
 
 ## Prerequisites
 
 - macOS (required for system commands)
-- [Bun](https://bun.sh) runtime
 - MQTT broker (e.g., Mosquitto, Home Assistant built-in)
 - Home Assistant with MQTT integration enabled
+
+Release executables contain Node.js; Node does not need to be installed on the
+target Mac.
 
 ## Installation
 
@@ -55,12 +59,15 @@ This will:
 
 ### Option 3: Build from Source
 
+Building requires Node.js 26.7.0. The repository's `.tool-versions` pins the
+exact version for asdf users.
+
 1. **Clone and setup:**
 
    ```bash
    git clone <your-repo-url>
    cd hass-agent
-   bun install
+   npm ci
    ```
 
 2. **Configure environment:**
@@ -72,7 +79,7 @@ This will:
 
 3. **Build executable:**
    ```bash
-   bun run build
+   npm run build
    ```
 
 ## Configuration
@@ -152,7 +159,7 @@ Or remove the environment variable entirely (defaults to enabled).
 ### Development
 
 ```bash
-bun run dev
+npm run dev
 ```
 
 ### Production (after building)
@@ -385,12 +392,12 @@ Increase the `UPDATE_INTERVAL` to reduce system command frequency.
 2. **Install dependencies:**
 
    ```bash
-   bun install
+   npm ci
    ```
 
 3. **Run in development mode:**
    ```bash
-   bun run dev
+   npm run dev
    ```
 
 ### Testing
@@ -399,13 +406,13 @@ The project includes comprehensive tests for the core functionality:
 
 ```bash
 # Run all tests
-bun test
+npm test
 
 # Run tests in watch mode
-bun test --watch
+npm run test:watch
 
-# Run tests with coverage
-bun test --coverage
+# Type-check the project
+npm run typecheck
 ```
 
 **Test Coverage:**
@@ -418,11 +425,11 @@ bun test --coverage
 
 ### Scripts
 
-- `bun run dev` - Run in development mode
-- `bun run build` - Build single file executable
-- `bun run start` - Run built executable
-- `bun test` - Run test suite
-- `bun test --watch` - Run tests in watch mode
+- `npm run dev` - Run in development mode
+- `npm run build` - Build a Node SEA for the current platform
+- `npm start` - Run the built executable
+- `npm test` - Run the test suite
+- `npm run test:watch` - Run tests in watch mode
 - `./hass-agent update-data-dragon` - Update League of Legends static data from Riot's Data Dragon API
 
 ### Project Structure
@@ -464,16 +471,4 @@ For issues and questions:
 1. Check the troubleshooting section
 2. Review Home Assistant logs
 3. Check MQTT broker logs
-4. Open an issue with system detailso install dependencies:
-
-```bash
-bun install
-```
-
-To run:
-
-```bash
-bun run index.ts
-```
-
-This project was created using `bun init` in bun v1.2.19. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+4. Open an issue with system details

@@ -1,40 +1,32 @@
 import {
-  afterAll,
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
   it,
-  mock,
-} from "bun:test";
+  vi,
+} from "vitest";
 import * as winston from "winston";
 import { executeCommand } from "./command-utils.ts";
 import { DisplayStatusReader } from "./display-status-reader.ts";
 
+const mockExecuteCommand = vi.hoisted(() => vi.fn());
+
+vi.mock("./command-utils.ts", () => ({
+  executeCommand: mockExecuteCommand,
+}));
+
 // Mock winston logger
 const mockLogger: winston.Logger = {
-  debug: mock(() => {}),
-  error: mock(() => {}),
-  info: mock(() => {}),
-  warn: mock(() => {}),
-  log: mock(() => {}),
+  debug: vi.fn(() => {}),
+  error: vi.fn(() => {}),
+  info: vi.fn(() => {}),
+  warn: vi.fn(() => {}),
+  log: vi.fn(() => {}),
 } as any;
 
 describe("DisplayStatusReader", () => {
   let reader: DisplayStatusReader;
-
-  beforeAll(() => {
-    // Set up module mocks
-    mock.module("./command-utils.ts", () => ({
-      executeCommand: mock(),
-    }));
-  });
-
-  afterAll(() => {
-    // Reset all mocks to prevent interference with other test files
-    mock.restore();
-  });
 
   beforeEach(() => {
     reader = new DisplayStatusReader(mockLogger);

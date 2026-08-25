@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replaced the Bun runtime with a pinned Node.js 26.7.0 Single Executable
+  Application while preserving the native `SACLockScreenImmediate` lock call
+  through Node's built-in FFI.
+- Migrated development and tests from Bun to npm and Vitest.
+
 ### Deprecated
 
 ### Removed

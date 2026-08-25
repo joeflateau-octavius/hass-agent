@@ -2,8 +2,8 @@
  * Data Dragon Updater Tests
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { rmdir } from "fs/promises";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { access, readFile, rm } from "fs/promises";
 import { join } from "path";
 import * as winston from "winston";
 import { DataDragonUpdater } from "./data-dragon-updater.ts";
@@ -28,7 +28,10 @@ describe("DataDragonUpdater", () => {
   afterAll(async () => {
     // Clean up test data
     try {
-      await rmdir(join(process.cwd(), "test-data"), { recursive: true });
+      await rm(join(process.cwd(), "test-data"), {
+        recursive: true,
+        force: true,
+      });
     } catch {
       // Ignore cleanup errors
     }
@@ -116,10 +119,9 @@ describe("DataDragonUpdater", () => {
 
     // File should exist and be readable
     const filePath = join(testDataDir, "test.json");
-    const file = Bun.file(filePath);
-    expect(await file.exists()).toBe(true);
+    await expect(access(filePath)).resolves.toBeUndefined();
 
-    const savedData = await file.json();
+    const savedData = JSON.parse(await readFile(filePath, "utf8"));
     expect(savedData).toEqual(testData);
   });
 
@@ -128,10 +130,9 @@ describe("DataDragonUpdater", () => {
     await updater.createIndexFile(version);
 
     const indexPath = join(testDataDir, "index.json");
-    const file = Bun.file(indexPath);
-    expect(await file.exists()).toBe(true);
+    await expect(access(indexPath)).resolves.toBeUndefined();
 
-    const indexData = await file.json();
+    const indexData = JSON.parse(await readFile(indexPath, "utf8"));
     expect(indexData.version).toBe(version);
     expect(indexData.lastUpdated).toBeDefined();
     expect(indexData.files).toBeDefined();

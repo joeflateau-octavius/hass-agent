@@ -2,7 +2,7 @@
  * Data Dragon Loader Tests
  */
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "vitest";
 import { DataDragonLoader } from "./data-dragon-loader.ts";
 
 describe("DataDragonLoader", () => {

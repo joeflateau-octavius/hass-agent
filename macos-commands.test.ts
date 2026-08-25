@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, vi } from "vitest";
 import {
   createMacOSCommands,
   RETIRED_MACOS_COMMAND_IDS,
@@ -13,7 +13,7 @@ describe("createMacOSCommands", () => {
   }
 
   it("defines the safe macOS command allowlist", () => {
-    const commands = createMacOSCommands(mock(async () => {}));
+    const commands = createMacOSCommands(vi.fn(async () => {}));
 
     expect(commands.map(({ id, name }) => ({ id, name }))).toEqual([
       { id: "lock_screen", name: "Lock Screen" },
@@ -22,8 +22,8 @@ describe("createMacOSCommands", () => {
   });
 
   it("locks the session without AppleScript", async () => {
-    const runner = mock(async () => {});
-    const screenLocker = mock(async () => {});
+    const runner = vi.fn(async () => {});
+    const screenLocker = vi.fn(async () => {});
     const command = createMacOSCommands(runner, screenLocker).find(
       ({ id }) => id === "lock_screen"
     );
@@ -35,7 +35,7 @@ describe("createMacOSCommands", () => {
   });
 
   it("sleeps the display with pmset", async () => {
-    const runner = mock(async () => {});
+    const runner = vi.fn(async () => {});
     const command = createMacOSCommands(runner).find(
       ({ id }) => id === "sleep_display"
     );

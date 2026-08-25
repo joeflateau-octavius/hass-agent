@@ -1,61 +1,96 @@
 import {
-  afterAll,
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
   it,
-  mock,
-} from "bun:test";
+  vi,
+} from "vitest";
 import * as winston from "winston";
 
 // Mock winston logger
 const mockLogger: winston.Logger = {
-  debug: mock(() => {}),
-  error: mock(() => {}),
-  info: mock(() => {}),
-  warn: mock(() => {}),
-  log: mock(() => {}),
+  debug: vi.fn(() => {}),
+  error: vi.fn(() => {}),
+  info: vi.fn(() => {}),
+  warn: vi.fn(() => {}),
+  log: vi.fn(() => {}),
 } as any;
 
-// Mock the reader classes instances
-const mockDisplayReader = {
-  getDisplayStatus: mock(),
-  getDetailedDisplayInfo: mock(),
-};
+const {
+  mockBatteryReader,
+  mockBatteryStatusReader,
+  mockDeviceEmitter,
+  mockDisplayReader,
+  mockDisplayStatusReader,
+  mockLoLStatusReader,
+  mockLoLStatusReaderClass,
+  mockMqttDeviceFrameworkClass,
+  mockMqttFramework,
+} = vi.hoisted(() => {
+  const mockDeviceEmitter = {
+    publishState: vi.fn(),
+  };
+  const mockDisplayReader = {
+    getDisplayStatus: vi.fn(),
+    getDetailedDisplayInfo: vi.fn(),
+  };
+  const mockBatteryReader = {
+    getUptimeInfo: vi.fn(),
+    setBatteryUpdateCallback: vi.fn(),
+    startPmsetRawlogMonitoring: vi.fn(),
+    stopPmsetRawlogMonitoring: vi.fn(),
+  };
+  const mockLoLStatusReader = {
+    getGameStatus: vi.fn(),
+    setStatusUpdateCallback: vi.fn(),
+    startMonitoring: vi.fn(),
+    stopMonitoring: vi.fn(),
+  };
+  const mockMqttFramework = {
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    createDeviceEmitter: vi.fn(() => mockDeviceEmitter),
+    registerCommands: vi.fn(),
+    retireCommands: vi.fn(),
+  };
 
-const mockBatteryReader = {
-  getUptimeInfo: mock(),
-  setBatteryUpdateCallback: mock(),
-  startPmsetRawlogMonitoring: mock(),
-  stopPmsetRawlogMonitoring: mock(),
-};
+  return {
+    mockBatteryReader,
+    mockBatteryStatusReader: vi.fn(function () {
+      return mockBatteryReader;
+    }),
+    mockDeviceEmitter,
+    mockDisplayReader,
+    mockDisplayStatusReader: vi.fn(function () {
+      return mockDisplayReader;
+    }),
+    mockLoLStatusReader,
+    mockLoLStatusReaderClass: vi.fn(function () {
+      return mockLoLStatusReader;
+    }),
+    mockMqttDeviceFrameworkClass: vi.fn(function () {
+      return mockMqttFramework;
+    }),
+    mockMqttFramework,
+  };
+});
 
-const mockLoLStatusReader = {
-  getGameStatus: mock(),
-  setStatusUpdateCallback: mock(),
-  startMonitoring: mock(),
-  stopMonitoring: mock(),
-};
+vi.mock("./display-status-reader.ts", () => ({
+  DisplayStatusReader: mockDisplayStatusReader,
+}));
 
-const mockMqttFramework = {
-  connect: mock(),
-  disconnect: mock(),
-  createDeviceEmitter: mock(() => mockDeviceEmitter),
-  registerCommands: mock(),
-  retireCommands: mock(),
-};
+vi.mock("./battery-status-reader.ts", () => ({
+  BatteryStatusReader: mockBatteryStatusReader,
+}));
 
-const mockDeviceEmitter = {
-  publishState: mock(),
-};
+vi.mock("./lol-status-reader.ts", () => ({
+  LoLStatusReader: mockLoLStatusReaderClass,
+}));
 
-// Mock the imported class constructors
-const mockDisplayStatusReader = mock(() => mockDisplayReader);
-const mockBatteryStatusReader = mock(() => mockBatteryReader);
-const mockLoLStatusReaderClass = mock(() => mockLoLStatusReader);
-const mockMqttDeviceFrameworkClass = mock(() => mockMqttFramework);
+vi.mock("./mqtt-emitter.ts", () => ({
+  MqttDeviceFramework: mockMqttDeviceFrameworkClass,
+}));
 
 // Import after mocking
 import { MacOSPowerAgent } from "./index.ts";
@@ -63,30 +98,6 @@ import { MacOSPowerAgent } from "./index.ts";
 describe("MacOSPowerAgent", () => {
   let agent: MacOSPowerAgent;
   let config: any;
-
-  beforeAll(() => {
-    // Set up module mocks
-    mock.module("./display-status-reader.ts", () => ({
-      DisplayStatusReader: mockDisplayStatusReader,
-    }));
-
-    mock.module("./battery-status-reader.ts", () => ({
-      BatteryStatusReader: mockBatteryStatusReader,
-    }));
-
-    mock.module("./lol-status-reader.ts", () => ({
-      LoLStatusReader: mockLoLStatusReaderClass,
-    }));
-
-    mock.module("./mqtt-emitter.ts", () => ({
-      MqttDeviceFramework: mockMqttDeviceFrameworkClass,
-    }));
-  });
-
-  afterAll(() => {
-    // Reset all mocks to prevent interference with other test files
-    mock.restore();
-  });
 
   beforeEach(() => {
     config = {
@@ -263,7 +274,7 @@ describe("MacOSPowerAgent", () => {
       // Set up periodic timer (upgradeCheckTimer is now handled by AutoUpdater)
       (agent as any).periodicTimer = setTimeout(() => {}, 1000);
 
-      const clearIntervalSpy = mock(() => {});
+      const clearIntervalSpy = vi.fn(() => {});
       global.clearInterval = clearIntervalSpy;
       mockMqttFramework.disconnect.mockResolvedValue(undefined);
 

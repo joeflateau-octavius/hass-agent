@@ -1,68 +1,67 @@
 import {
-  afterAll,
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
   it,
-  mock,
-} from "bun:test";
+  vi,
+} from "vitest";
 import * as winston from "winston";
 import type { BatteryInfo } from "./battery-parser.ts";
 import { BatteryStatusReader } from "./battery-status-reader.ts";
 import { executeCommand } from "./command-utils.ts";
 
-// Mock spawn
-const mockSpawn = mock();
-const mockStdout = {
-  on: mock(),
-  resume: mock(),
-};
-const mockStderr = {
-  on: mock(),
-};
-const mockProcess = {
-  stdout: mockStdout,
-  stderr: mockStderr,
-  on: mock(),
-  kill: mock(),
-  killed: false,
-};
+const { mockProcess, mockSpawn, mockStderr, mockStdout } = vi.hoisted(() => {
+  const mockStdout = {
+    on: vi.fn(),
+    resume: vi.fn(),
+  };
+  const mockStderr = {
+    on: vi.fn(),
+  };
+  const mockProcess = {
+    stdout: mockStdout,
+    stderr: mockStderr,
+    on: vi.fn(),
+    kill: vi.fn(),
+    killed: false,
+  };
+
+  return {
+    mockProcess,
+    mockSpawn: vi.fn(),
+    mockStderr,
+    mockStdout,
+  };
+});
+
+const mockExecuteCommand = vi.hoisted(() => vi.fn());
+
+vi.mock("./command-utils.ts", () => ({
+  executeCommand: mockExecuteCommand,
+}));
+
+vi.mock("child_process", () => ({
+  spawn: mockSpawn,
+}));
+
+vi.mock("readline", () => ({
+  createInterface: vi.fn(() => ({
+    on: vi.fn(),
+  })),
+}));
 
 // Mock winston logger
 const mockLogger: winston.Logger = {
-  debug: mock(() => {}),
-  error: mock(() => {}),
-  info: mock(() => {}),
-  warn: mock(() => {}),
-  log: mock(() => {}),
+  debug: vi.fn(() => {}),
+  error: vi.fn(() => {}),
+  info: vi.fn(() => {}),
+  warn: vi.fn(() => {}),
+  log: vi.fn(() => {}),
 } as any;
 
 describe("BatteryStatusReader", () => {
   let reader: BatteryStatusReader;
-
-  beforeAll(() => {
-    // Set up module mocks
-    mock.module("./command-utils.ts", () => ({
-      executeCommand: mock(),
-    }));
-
-    mock.module("child_process", () => ({
-      spawn: mockSpawn,
-    }));
-
-    mock.module("readline", () => ({
-      createInterface: mock(() => ({
-        on: mock(),
-      })),
-    }));
-  });
-
-  afterAll(() => {
-    // Reset all mocks to prevent interference with other test files
-    mock.restore();
-  });
 
   beforeEach(() => {
     reader = new BatteryStatusReader(mockLogger);
@@ -119,7 +118,7 @@ describe("BatteryStatusReader", () => {
 
   describe("setBatteryUpdateCallback", () => {
     it("should set battery update callback", () => {
-      const callback = mock();
+      const callback = vi.fn();
       reader.setBatteryUpdateCallback(callback);
 
       expect(reader["onBatteryUpdate"]).toBe(callback);
@@ -139,7 +138,7 @@ describe("BatteryStatusReader", () => {
   describe("stopPmsetRawlogMonitoring", () => {
     it("should stop pmset rawlog monitoring", () => {
       const mockProcess = {
-        kill: mock(),
+        kill: vi.fn(),
         killed: false,
       };
 
@@ -159,7 +158,7 @@ describe("BatteryStatusReader", () => {
 
     it("should handle case when process is already killed", () => {
       const mockProcess = {
-        kill: mock(),
+        kill: vi.fn(),
         killed: true,
       };
 
@@ -172,16 +171,11 @@ describe("BatteryStatusReader", () => {
   });
 
   describe("battery parsing integration", () => {
-    it("should call callback when valid battery line is received", (done) => {
-      let callbackCount = 0;
-      const callback = mock((batteryInfo: BatteryInfo) => {
+    it("should call callback when valid battery line is received", () => {
+      const callback = vi.fn((batteryInfo: BatteryInfo) => {
         expect(batteryInfo.batteryLevel).toBe(85);
         expect(batteryInfo.isCharging).toBe(true);
         expect(batteryInfo.powerSource).toBe("AC");
-        callbackCount++;
-        if (callbackCount === 1) {
-          done();
-        }
       });
 
       reader.setBatteryUpdateCallback(callback);
@@ -197,7 +191,7 @@ describe("BatteryStatusReader", () => {
         condition: "Normal",
       };
 
-      (reader as any).parsePmsetRawlogLine = mock(() => mockBatteryInfo);
+      (reader as any).parsePmsetRawlogLine = vi.fn(() => mockBatteryInfo);
 
       // Simulate calling the line parser directly (as would happen in the readline interface)
       const testLine = "2024-08-03 10:00:00 +0000;Charging;85%;AC;120;";
@@ -205,13 +199,15 @@ describe("BatteryStatusReader", () => {
       if (batteryInfo && reader["onBatteryUpdate"]) {
         reader["onBatteryUpdate"](batteryInfo);
       }
+
+      expect(callback).toHaveBeenCalledTimes(1);
     });
 
     it("should not call callback for invalid battery lines", () => {
-      const callback = mock();
+      const callback = vi.fn();
       reader.setBatteryUpdateCallback(callback);
 
-      (reader as any).parsePmsetRawlogLine = mock(() => null);
+      (reader as any).parsePmsetRawlogLine = vi.fn(() => null);
 
       // Simulate calling the line parser with invalid data
       const testLine = "invalid line";

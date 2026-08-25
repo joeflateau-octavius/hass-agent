@@ -1,10 +1,5 @@
-# dependencies (bun install)
+# dependencies
 node_modules
-
-# Bun specific
-.bun
-bun.lockb
-*.bun
 
 # Compiled executable
 hass-agent
