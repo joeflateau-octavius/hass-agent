@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Explicitly ad-hoc sign and verify macOS release executables before
   publishing, preventing `OS_REASON_CODESIGNING` launch failures.
+- Load the existing `.env` configuration with Node's native dotenv parser,
+  restoring installed agents that previously relied on Bun's implicit loading.
 
 ### Security
 
