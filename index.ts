@@ -28,6 +28,7 @@ import {
   DisplayStatusReader,
   type DisplayInfo,
 } from "./display-status-reader.ts";
+import { loadEnvironmentFile } from "./environment.ts";
 import { LoLStatusReader, type LoLGameStatus } from "./lol-status-reader.ts";
 import {
   createMacOSCommands,
@@ -38,6 +39,8 @@ import {
   type MqttConfig,
   type MqttDeviceEmitter,
 } from "./mqtt-emitter.ts";
+
+loadEnvironmentFile();
 
 const syncEnvSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
