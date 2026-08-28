@@ -21,6 +21,9 @@ import { AutoUpdater, type AutoUpdaterConfig } from "./auto-updater.ts";
 import {
   type AutoUpgradeSettingsStore,
   FileAutoUpgradeSettingsStore,
+  MAX_UPGRADE_CHECK_INTERVAL,
+  MIN_UPGRADE_CHECK_INTERVAL,
+  UPGRADE_CHECK_INTERVAL_STEP,
 } from "./auto-upgrade-settings.ts";
 import { type BatteryInfo } from "./battery-parser.ts";
 import {
@@ -45,6 +48,8 @@ import {
 } from "./mqtt-emitter.ts";
 
 loadEnvironmentFile();
+
+const HOUR_MS = 60 * 60 * 1000;
 
 const syncEnvSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
@@ -127,6 +132,14 @@ const envSchema = z.object({
     .string()
     .regex(/^\d+$/)
     .transform(Number)
+    .refine(
+      (value) =>
+        Number.isSafeInteger(value) &&
+        value >= MIN_UPGRADE_CHECK_INTERVAL &&
+        value <= MAX_UPGRADE_CHECK_INTERVAL &&
+        value % UPGRADE_CHECK_INTERVAL_STEP === 0,
+      "must be a 15-minute increment between 15 minutes and 168 hours"
+    )
     .default(() => 3 * 60 * 60 * 1000), // 3 hours in milliseconds
   INSTALL_SCRIPT_URL: z
     .string()
@@ -474,6 +487,25 @@ class MacOSPowerAgent {
         },
       },
     ]);
+    this.mqttFramework.registerNumbers([
+      {
+        id: "upgrade_check_interval",
+        name: "Upgrade Check Interval",
+        icon: "mdi:timer-sync-outline",
+        min: MIN_UPGRADE_CHECK_INTERVAL / HOUR_MS,
+        max: MAX_UPGRADE_CHECK_INTERVAL / HOUR_MS,
+        step: UPGRADE_CHECK_INTERVAL_STEP / HOUR_MS,
+        unitOfMeasurement: "h",
+        deviceClass: "duration",
+        getState: () => this.autoUpdater.getCheckInterval() / HOUR_MS,
+        setState: async (hours) => {
+          const interval = Math.round(hours * HOUR_MS);
+          await this.autoUpgradeSettings.saveInterval(interval);
+          this.config.UPGRADE_CHECK_INTERVAL = interval;
+          this.autoUpdater.setCheckInterval(interval);
+        },
+      },
+    ]);
 
     // Set up battery update callback
     this.batteryReader.setBatteryUpdateCallback((batteryInfo) => {
@@ -657,11 +689,15 @@ async function main() {
   try {
     const rawConfig = envSchema.parse(process.env);
     const autoUpgrade = await autoUpgradeSettings.load(rawConfig.AUTO_UPGRADE);
+    const upgradeCheckInterval = await autoUpgradeSettings.loadInterval(
+      rawConfig.UPGRADE_CHECK_INTERVAL
+    );
     // Set default device name to computer name if not provided
     const deviceName = rawConfig.DEVICE_NAME || (await getComputerName());
     config = {
       ...rawConfig,
       AUTO_UPGRADE: autoUpgrade,
+      UPGRADE_CHECK_INTERVAL: upgradeCheckInterval,
       DEVICE_NAME: deviceName,
     };
   } catch (error) {

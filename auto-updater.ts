@@ -20,6 +20,7 @@ export class AutoUpdater {
   private config: AutoUpdaterConfig;
   private logger: winston.Logger;
   private upgradeCheckTimer?: NodeJS.Timeout;
+  private upgradeCheckInFlight = false;
 
   constructor(config: AutoUpdaterConfig, logger: winston.Logger) {
     this.config = config;
@@ -62,32 +63,31 @@ export class AutoUpdater {
     }
   }
 
+  public getCheckInterval(): number {
+    return this.config.upgradeCheckInterval;
+  }
+
+  public setCheckInterval(interval: number): void {
+    if (this.config.upgradeCheckInterval === interval) {
+      return;
+    }
+
+    this.config.upgradeCheckInterval = interval;
+    if (this.upgradeCheckTimer) {
+      clearInterval(this.upgradeCheckTimer);
+      this.upgradeCheckTimer = undefined;
+      this.schedulePeriodicChecks();
+    }
+  }
+
   private scheduleUpgradeCheck(): void {
-    const runUpgradeCheck = async (): Promise<void> => {
-      try {
-        this.logger.info("Checking for updates...");
+    void this.runUpgradeCheck();
+    this.schedulePeriodicChecks();
+  }
 
-        // Execute the install script with detached process so it can outlive this process
-        // The install script may need to kill this process to update the binary
-        await executeCommand(
-          `curl -fsSL "${this.config.installScriptUrl}" | bash`,
-          {
-            env: { ...process.env, INSTALLED_VERSION: this.config.version },
-            detached: true, // Allow the process to run independently
-            stdio: "ignore", // Disconnect stdio so child can outlive parent
-          }
-        );
-      } catch (error) {
-        this.logger.error(`Upgrade check failed: ${error}`);
-      }
-    };
-
-    // Initial check immediately
-    runUpgradeCheck();
-
-    // Schedule periodic checks
+  private schedulePeriodicChecks(): void {
     this.upgradeCheckTimer = setInterval(() => {
-      runUpgradeCheck();
+      void this.runUpgradeCheck();
     }, this.config.upgradeCheckInterval);
 
     this.logger.info(
@@ -95,5 +95,32 @@ export class AutoUpdater {
         this.config.upgradeCheckInterval / (60 * 60 * 1000)
       } hours`
     );
+  }
+
+  private async runUpgradeCheck(): Promise<void> {
+    if (this.upgradeCheckInFlight) {
+      this.logger.warn("Skipping upgrade check because one is already running");
+      return;
+    }
+
+    this.upgradeCheckInFlight = true;
+    try {
+      this.logger.info("Checking for updates...");
+
+      // Execute the install script with detached process so it can outlive this process
+      // The install script may need to kill this process to update the binary
+      await executeCommand(
+        `curl -fsSL "${this.config.installScriptUrl}" | bash`,
+        {
+          env: { ...process.env, INSTALLED_VERSION: this.config.version },
+          detached: true, // Allow the process to run independently
+          stdio: "ignore", // Disconnect stdio so child can outlive parent
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Upgrade check failed: ${error}`);
+    } finally {
+      this.upgradeCheckInFlight = false;
+    }
   }
 }

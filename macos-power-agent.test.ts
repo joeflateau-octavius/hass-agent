@@ -53,6 +53,7 @@ const {
     createDeviceEmitter: vi.fn(() => mockDeviceEmitter),
     registerCommands: vi.fn(),
     registerSwitches: vi.fn(),
+    registerNumbers: vi.fn(),
     retireCommands: vi.fn(),
   };
 
@@ -184,6 +185,19 @@ describe("MacOSPowerAgent", () => {
           setState: expect.any(Function),
         }),
       ]);
+      expect(mockMqttFramework.registerNumbers).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: "upgrade_check_interval",
+          name: "Upgrade Check Interval",
+          min: 0.25,
+          max: 168,
+          step: 0.25,
+          unitOfMeasurement: "h",
+          deviceClass: "duration",
+          getState: expect.any(Function),
+          setState: expect.any(Function),
+        }),
+      ]);
     });
 
     it("should set battery update callback", () => {
@@ -302,6 +316,8 @@ describe("MacOSPowerAgent", () => {
       const settingsStore = {
         load: vi.fn(async (fallback: boolean) => fallback),
         save,
+        loadInterval: vi.fn(async (fallback: number) => fallback),
+        saveInterval: vi.fn(async () => {}),
       };
       agent = new MacOSPowerAgent(
         { ...config, VERSION: "development" },
@@ -320,6 +336,38 @@ describe("MacOSPowerAgent", () => {
       saved.resolve();
       await update;
       expect(switchDefinition.getState()).toBe(true);
+    });
+
+    it("persists and applies Home Assistant interval changes", async () => {
+      const saved = Promise.withResolvers<void>();
+      const saveInterval = vi.fn(() => saved.promise);
+      const settingsStore = {
+        load: vi.fn(async (fallback: boolean) => fallback),
+        save: vi.fn(async () => {}),
+        loadInterval: vi.fn(async (fallback: number) => fallback),
+        saveInterval,
+      };
+      agent = new MacOSPowerAgent(
+        {
+          ...config,
+          VERSION: "development",
+          UPGRADE_CHECK_INTERVAL: 60 * 60 * 1000,
+        },
+        mockLogger,
+        settingsStore
+      );
+      const numberDefinition =
+        mockMqttFramework.registerNumbers.mock.calls.at(-1)?.[0]?.[0];
+
+      expect(numberDefinition.getState()).toBe(1);
+      const update = numberDefinition.setState(1.5);
+      await Promise.resolve();
+
+      expect(saveInterval).toHaveBeenCalledWith(90 * 60 * 1000);
+      expect(numberDefinition.getState()).toBe(1);
+      saved.resolve();
+      await update;
+      expect(numberDefinition.getState()).toBe(1.5);
     });
 
     it("should schedule upgrade check when enabled", async () => {

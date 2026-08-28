@@ -9,7 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { rm } from "node:fs/promises";
-import { FileAutoUpgradeSettingsStore } from "./auto-upgrade-settings.ts";
+import {
+  FileAutoUpgradeSettingsStore,
+  MAX_UPGRADE_CHECK_INTERVAL,
+  MIN_UPGRADE_CHECK_INTERVAL,
+} from "./auto-upgrade-settings.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -53,6 +57,72 @@ describe("FileAutoUpgradeSettingsStore", () => {
     await store.save(false);
 
     await expect(store.load(true)).resolves.toBe(false);
+  });
+
+  it("uses the environment-derived interval before HA manages it", async () => {
+    const { store } = await createStore();
+
+    await expect(store.loadInterval(3 * 60 * 60 * 1000)).resolves.toBe(
+      3 * 60 * 60 * 1000
+    );
+  });
+
+  it("persists an HA-managed interval and preserves the upgrade switch", async () => {
+    const { path, store } = await createStore();
+    await store.save(true);
+
+    await store.saveInterval(90 * 60 * 1000);
+
+    await expect(store.loadInterval(3 * 60 * 60 * 1000)).resolves.toBe(
+      90 * 60 * 1000
+    );
+    await expect(store.load(false)).resolves.toBe(true);
+    await expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      autoUpgrade: true,
+      upgradeCheckInterval: 90 * 60 * 1000,
+    });
+  });
+
+  it("serializes simultaneous switch and interval writes", async () => {
+    const { path, store } = await createStore();
+
+    await Promise.all([
+      store.save(true),
+      store.saveInterval(90 * 60 * 1000),
+    ]);
+
+    await expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      autoUpgrade: true,
+      upgradeCheckInterval: 90 * 60 * 1000,
+    });
+  });
+
+  it("rejects managed intervals outside the supported range or step", async () => {
+    const { store } = await createStore();
+
+    await expect(
+      store.saveInterval(MIN_UPGRADE_CHECK_INTERVAL - 1)
+    ).rejects.toThrow("15-minute increment");
+    await expect(
+      store.saveInterval(MAX_UPGRADE_CHECK_INTERVAL + 1)
+    ).rejects.toThrow("15-minute increment");
+    await expect(store.saveInterval(20 * 60 * 1000)).rejects.toThrow(
+      "15-minute increment"
+    );
+  });
+
+  it("falls back to the environment interval when the managed value is invalid", async () => {
+    const { path } = await createStore();
+    const reportError = vi.fn();
+    const store = new FileAutoUpgradeSettingsStore(path, reportError);
+    await writeFile(path, '{"upgradeCheckInterval":1000}\n');
+
+    await expect(store.loadInterval(3 * 60 * 60 * 1000)).resolves.toBe(
+      3 * 60 * 60 * 1000
+    );
+    expect(reportError).toHaveBeenCalledWith(
+      expect.stringContaining("environment-derived upgrade interval")
+    );
   });
 
   it("preserves future managed settings when changing auto-upgrade", async () => {

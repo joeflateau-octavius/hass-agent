@@ -826,6 +826,234 @@ describe("MqttDeviceFramework", () => {
     });
   });
 
+  describe("registerNumbers", () => {
+    const definition = (overrides: Record<string, unknown> = {}) => ({
+      id: "upgrade_check_interval",
+      name: "Upgrade Check Interval",
+      icon: "mdi:timer-sync-outline",
+      min: 0.25,
+      max: 168,
+      step: 0.25,
+      unitOfMeasurement: "h",
+      deviceClass: "duration",
+      getState: () => 3,
+      setState: vi.fn(async () => {}),
+      ...overrides,
+    });
+
+    it("publishes native Home Assistant number discovery, state, and subscription", () => {
+      mockMqttClient.connected = true;
+      framework.registerNumbers([definition()]);
+
+      const discoveryCall = mockMqttClient.publish.mock.calls.find(
+        (call: any[]) =>
+          call[0] ===
+          "homeassistant/number/test-device/upgrade_check_interval/config"
+      );
+      expect(JSON.parse(discoveryCall![1])).toEqual(
+        expect.objectContaining({
+          name: "Upgrade Check Interval",
+          unique_id: "test-device_upgrade_check_interval",
+          state_topic:
+            "hass-agent/test-device/number/upgrade_check_interval/state",
+          command_topic:
+            "hass-agent/test-device/number/upgrade_check_interval/set",
+          min: 0.25,
+          max: 168,
+          step: 0.25,
+          mode: "box",
+          unit_of_measurement: "h",
+          device_class: "duration",
+          optimistic: false,
+          qos: 1,
+          retain: false,
+          entity_category: "config",
+          availability_topic: "homeassistant/status/test-device",
+          device: expect.objectContaining({ identifiers: ["test-device"] }),
+        })
+      );
+      expect(discoveryCall![2]).toEqual({ qos: 1, retain: true });
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/number/upgrade_check_interval/state",
+        "3",
+        { qos: 1, retain: true }
+      );
+      expect(mockMqttClient.subscribe).toHaveBeenCalledWith(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        { qos: 1 },
+        expect.any(Function)
+      );
+    });
+
+    it("applies a valid interval and republishes the effective value", async () => {
+      let interval = 3;
+      const updated = Promise.withResolvers<void>();
+      const setState = vi.fn(async (value: number) => {
+        interval = value;
+        updated.resolve();
+      });
+      framework.registerNumbers([
+        definition({ getState: () => interval, setState }),
+      ]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        Buffer.from("1.5")
+      );
+      await updated.promise;
+      await Promise.resolve();
+
+      expect(setState).toHaveBeenCalledWith(1.5);
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/number/upgrade_check_interval/state",
+        "1.5",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it.each([" 1.5 ", "1e2", "NaN", "Infinity", "0", "168.25", "1.1"])(
+      "rejects invalid number payload %j and republishes current state",
+      async (payload) => {
+        const setState = vi.fn(async () => {});
+        framework.registerNumbers([definition({ setState })]);
+        mockMqttClient.publish.mockClear();
+        const messageHandler = mockMqttClient.on.mock.calls.find(
+          (call: any[]) => call[0] === "message"
+        )?.[1];
+
+        messageHandler?.(
+          "hass-agent/test-device/number/upgrade_check_interval/set",
+          Buffer.from(payload)
+        );
+        await Promise.resolve();
+
+        expect(setState).not.toHaveBeenCalled();
+        expect(mockMqttClient.publish).toHaveBeenCalledWith(
+          "hass-agent/test-device/number/upgrade_check_interval/state",
+          "3",
+          { qos: 1, retain: true }
+        );
+      }
+    );
+
+    it("rejects retained values and reverts HA when persistence fails", async () => {
+      const setState = vi.fn(async () => {
+        throw new Error("settings file is read-only");
+      });
+      framework.registerNumbers([definition({ setState })]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        Buffer.from("1.5"),
+        { retain: true }
+      );
+      await Promise.resolve();
+      expect(setState).not.toHaveBeenCalled();
+
+      messageHandler?.(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        Buffer.from("1.5")
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "MQTT number update failed (upgrade_check_interval): settings file is read-only"
+      );
+      expect(mockMqttClient.publish).toHaveBeenLastCalledWith(
+        "hass-agent/test-device/number/upgrade_check_interval/state",
+        "3",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it("serializes rapid interval changes so the last value wins", async () => {
+      let interval = 3;
+      const releaseFirst = Promise.withResolvers<void>();
+      const secondApplied = Promise.withResolvers<void>();
+      const values: number[] = [];
+      const setState = vi.fn(async (value: number) => {
+        values.push(value);
+        if (value === 1) await releaseFirst.promise;
+        interval = value;
+        if (value === 2) secondApplied.resolve();
+      });
+      framework.registerNumbers([
+        definition({ getState: () => interval, setState }),
+      ]);
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        Buffer.from("1")
+      );
+      messageHandler?.(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        Buffer.from("2")
+      );
+      await Promise.resolve();
+
+      expect(values).toEqual([1]);
+      releaseFirst.resolve();
+      await secondApplied.promise;
+      await Promise.resolve();
+
+      expect(values).toEqual([1, 2]);
+      expect(interval).toBe(2);
+    });
+
+    it("republishes number discovery and effective state after reconnect", () => {
+      framework.registerNumbers([definition()]);
+      mockMqttClient.publish.mockClear();
+      mockMqttClient.subscribe.mockClear();
+      const connectHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "connect"
+      )?.[1];
+
+      mockMqttClient.connected = true;
+      connectHandler?.();
+
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "homeassistant/number/test-device/upgrade_check_interval/config",
+        expect.any(String),
+        { qos: 1, retain: true }
+      );
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/number/upgrade_check_interval/state",
+        "3",
+        { qos: 1, retain: true }
+      );
+      expect(mockMqttClient.subscribe).toHaveBeenCalledWith(
+        "hass-agent/test-device/number/upgrade_check_interval/set",
+        { qos: 1 },
+        expect.any(Function)
+      );
+    });
+
+    it("rejects invalid and duplicate number definitions", () => {
+      expect(() =>
+        framework.registerNumbers([definition({ id: "upgrade interval" })])
+      ).toThrow("Invalid MQTT number id");
+      expect(() =>
+        framework.registerNumbers([definition({ step: 0 })])
+      ).toThrow("Invalid MQTT number range");
+
+      framework.registerNumbers([definition()]);
+      expect(() => framework.registerNumbers([definition()])).toThrow(
+        "Duplicate MQTT number id"
+      );
+    });
+  });
+
   describe("MQTT event handlers", () => {
     it("should handle connect event", () => {
       const connectHandler = mockMqttClient.on.mock.calls.find(
