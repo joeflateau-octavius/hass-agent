@@ -56,6 +56,19 @@ export interface MqttSwitchDefinition {
   setState: (enabled: boolean) => Promise<void>;
 }
 
+export interface MqttNumberDefinition {
+  id: string;
+  name: string;
+  icon?: string;
+  min: number;
+  max: number;
+  step: number;
+  unitOfMeasurement?: string;
+  deviceClass?: string;
+  getState: () => number;
+  setState: (value: number) => Promise<void>;
+}
+
 interface MqttButtonConfig {
   name: string;
   unique_id: string;
@@ -88,6 +101,28 @@ interface MqttSwitchConfig {
   device: DeviceConfig;
 }
 
+interface MqttNumberConfig {
+  name: string;
+  unique_id: string;
+  state_topic: string;
+  command_topic: string;
+  min: number;
+  max: number;
+  step: number;
+  mode: "box";
+  unit_of_measurement?: string;
+  device_class?: string;
+  availability_topic: string;
+  payload_available: string;
+  payload_not_available: string;
+  optimistic: false;
+  qos: 1;
+  retain: false;
+  entity_category: "config";
+  icon?: string;
+  device: DeviceConfig;
+}
+
 interface CommandResult {
   command: string;
   status: "success" | "error";
@@ -98,6 +133,14 @@ interface CommandResult {
 // Home Assistant MQTT Discovery topics
 const DISCOVERY_PREFIX = "homeassistant";
 const COMMAND_PREFIX = "hass-agent";
+const MAX_LOGGED_PAYLOAD_LENGTH = 128;
+
+function formatPayloadForLog(payload: string): string {
+  const sanitized = payload.replace(/[\u0000-\u001f\u007f]/g, "?");
+  return sanitized.length > MAX_LOGGED_PAYLOAD_LENGTH
+    ? `${sanitized.slice(0, MAX_LOGGED_PAYLOAD_LENGTH)}…`
+    : sanitized;
+}
 
 export class MqttDeviceFramework {
   private logger: winston.Logger;
@@ -110,6 +153,8 @@ export class MqttDeviceFramework {
   private commands = new Map<string, MqttCommandDefinition>();
   private switches = new Map<string, MqttSwitchDefinition>();
   private switchUpdates = new Map<string, Promise<void>>();
+  private numbers = new Map<string, MqttNumberDefinition>();
+  private numberUpdates = new Map<string, Promise<void>>();
   private retiredCommandIds = new Set<string>();
 
   constructor(config: MqttConfig, logger: winston.Logger) {
@@ -213,6 +258,33 @@ export class MqttDeviceFramework {
     }
   }
 
+  public registerNumbers(numbers: MqttNumberDefinition[]): void {
+    for (const definition of numbers) {
+      if (!/^[a-z0-9_]+$/.test(definition.id)) {
+        throw new Error(`Invalid MQTT number id: ${definition.id}`);
+      }
+      if (this.numbers.has(definition.id)) {
+        throw new Error(`Duplicate MQTT number id: ${definition.id}`);
+      }
+      if (
+        !Number.isFinite(definition.min) ||
+        !Number.isFinite(definition.max) ||
+        !Number.isFinite(definition.step) ||
+        definition.min >= definition.max ||
+        definition.step <= 0
+      ) {
+        throw new Error(`Invalid MQTT number range: ${definition.id}`);
+      }
+      this.numbers.set(definition.id, definition);
+    }
+
+    this.publishNumberDiscoveryConfigs();
+    this.publishNumberStates();
+    if (this.client.connected) {
+      this.subscribeToNumberTopics();
+    }
+  }
+
   public async connect(): Promise<void> {
     return new Promise((resolve) => {
       if (this.client.connected) {
@@ -224,7 +296,9 @@ export class MqttDeviceFramework {
         );
         this.subscribeToCommandTopic();
         this.subscribeToSwitchTopics();
+        this.subscribeToNumberTopics();
         this.publishSwitchStates();
+        this.publishNumberStates();
         resolve();
       } else {
         this.client.once("connect", () => {
@@ -281,8 +355,11 @@ export class MqttDeviceFramework {
       this.publishCommandDiscoveryConfigs();
       this.publishSwitchDiscoveryConfigs();
       this.publishSwitchStates();
+      this.publishNumberDiscoveryConfigs();
+      this.publishNumberStates();
       this.subscribeToCommandTopic();
       this.subscribeToSwitchTopics();
+      this.subscribeToNumberTopics();
     });
 
     this.client.on("error", (error) => {
@@ -407,6 +484,52 @@ export class MqttDeviceFramework {
     );
   }
 
+  private publishNumberDiscoveryConfigs(): void {
+    for (const definition of this.numbers.values()) {
+      const config: MqttNumberConfig = {
+        name: definition.name,
+        unique_id: `${this.deviceId}_${definition.id}`,
+        state_topic: this.getNumberStateTopic(definition.id),
+        command_topic: this.getNumberCommandTopic(definition.id),
+        min: definition.min,
+        max: definition.max,
+        step: definition.step,
+        mode: "box",
+        unit_of_measurement: definition.unitOfMeasurement,
+        device_class: definition.deviceClass,
+        availability_topic: `${DISCOVERY_PREFIX}/status/${this.deviceId}`,
+        payload_available: "online",
+        payload_not_available: "offline",
+        optimistic: false,
+        qos: 1,
+        retain: false,
+        entity_category: "config",
+        icon: definition.icon,
+        device: this.deviceConfig,
+      };
+
+      this.client.publish(
+        `${DISCOVERY_PREFIX}/number/${this.deviceId}/${definition.id}/config`,
+        JSON.stringify(config),
+        { qos: 1, retain: true }
+      );
+    }
+  }
+
+  private publishNumberStates(): void {
+    for (const definition of this.numbers.values()) {
+      this.publishNumberState(definition);
+    }
+  }
+
+  private publishNumberState(definition: MqttNumberDefinition): void {
+    this.client.publish(
+      this.getNumberStateTopic(definition.id),
+      String(definition.getState()),
+      { qos: 1, retain: true }
+    );
+  }
+
   private subscribeToCommandTopic(): void {
     if (!this.client.connected || this.commands.size === 0) {
       return;
@@ -443,12 +566,37 @@ export class MqttDeviceFramework {
     }
   }
 
+  private subscribeToNumberTopics(): void {
+    if (!this.client.connected) {
+      return;
+    }
+
+    for (const definition of this.numbers.values()) {
+      const topic = this.getNumberCommandTopic(definition.id);
+      this.client.subscribe(topic, { qos: 1 }, (error) => {
+        if (error) {
+          this.logger.error(
+            `Failed to subscribe to MQTT number topic ${topic}: ${error}`
+          );
+        }
+      });
+    }
+  }
+
   private getSwitchStateTopic(switchId: string): string {
     return `${COMMAND_PREFIX}/${this.deviceId}/switch/${switchId}/state`;
   }
 
   private getSwitchCommandTopic(switchId: string): string {
     return `${COMMAND_PREFIX}/${this.deviceId}/switch/${switchId}/set`;
+  }
+
+  private getNumberStateTopic(numberId: string): string {
+    return `${COMMAND_PREFIX}/${this.deviceId}/number/${numberId}/state`;
+  }
+
+  private getNumberCommandTopic(numberId: string): string {
+    return `${COMMAND_PREFIX}/${this.deviceId}/number/${numberId}/set`;
   }
 
   private async handleMessage(
@@ -468,10 +616,24 @@ export class MqttDeviceFramework {
     const definition = [...this.switches.values()].find(
       (candidate) => this.getSwitchCommandTopic(candidate.id) === topic
     );
-    if (!definition) {
+    if (definition) {
+      await this.handleSwitchMessage(definition, payload, packet);
       return;
     }
 
+    const numberDefinition = [...this.numbers.values()].find(
+      (candidate) => this.getNumberCommandTopic(candidate.id) === topic
+    );
+    if (numberDefinition) {
+      await this.handleNumberMessage(numberDefinition, payload, packet);
+    }
+  }
+
+  private async handleSwitchMessage(
+    definition: MqttSwitchDefinition,
+    payload: Buffer,
+    packet?: { retain?: boolean }
+  ): Promise<void> {
     if (packet?.retain) {
       this.logger.warn(
         `Ignored retained MQTT switch command for ${definition.id}`
@@ -483,7 +645,7 @@ export class MqttDeviceFramework {
     const requestedState = payload.toString("utf8");
     if (requestedState !== "ON" && requestedState !== "OFF") {
       this.logger.warn(
-        `Ignored invalid MQTT switch payload for ${definition.id}: ${requestedState}`
+        `Ignored invalid MQTT switch payload for ${definition.id}: ${formatPayloadForLog(requestedState)}`
       );
       this.publishSwitchState(definition);
       return;
@@ -512,6 +674,64 @@ export class MqttDeviceFramework {
     } finally {
       if (this.switchUpdates.get(definition.id) === update) {
         this.switchUpdates.delete(definition.id);
+      }
+    }
+  }
+
+  private async handleNumberMessage(
+    definition: MqttNumberDefinition,
+    payload: Buffer,
+    packet?: { retain?: boolean }
+  ): Promise<void> {
+    if (packet?.retain) {
+      this.logger.warn(
+        `Ignored retained MQTT number command for ${definition.id}`
+      );
+      this.publishNumberState(definition);
+      return;
+    }
+
+    const requestedText = payload.toString("utf8");
+    const requestedValue = /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(requestedText)
+      ? Number(requestedText)
+      : Number.NaN;
+    const steps = (requestedValue - definition.min) / definition.step;
+    const valid =
+      Number.isFinite(requestedValue) &&
+      requestedValue >= definition.min &&
+      requestedValue <= definition.max &&
+      Math.abs(steps - Math.round(steps)) < 1e-9;
+    if (!valid) {
+      this.logger.warn(
+        `Ignored invalid MQTT number payload for ${definition.id}: ${formatPayloadForLog(requestedText)}`
+      );
+      this.publishNumberState(definition);
+      return;
+    }
+
+    const previousUpdate = this.numberUpdates.get(definition.id);
+    const update = (previousUpdate ?? Promise.resolve()).then(async () => {
+      try {
+        await definition.setState(requestedValue);
+        this.logger.info(
+          `MQTT number updated: ${definition.id}=${requestedText}`
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `MQTT number update failed (${definition.id}): ${message}`
+        );
+      } finally {
+        this.publishNumberState(definition);
+      }
+    });
+    this.numberUpdates.set(definition.id, update);
+
+    try {
+      await update;
+    } finally {
+      if (this.numberUpdates.get(definition.id) === update) {
+        this.numberUpdates.delete(definition.id);
       }
     }
   }

@@ -122,9 +122,10 @@ The agent includes built-in auto-upgrade functionality:
 - **Smart Upgrades**: Uses a dedicated upgrade script that compares versions
 - **Zero-Downtime Updates**: Handles service stopping and restarting automatically
 - **Visible in Home Assistant**: Each device exposes an **Automatic Upgrades**
-  configuration switch showing the effective setting
-- **Configurable**: Can be disabled in Home Assistant or customized via
-  environment variables
+  configuration switch and an **Upgrade Check Interval** configuration number
+  showing the effective settings
+- **Configurable**: Can be enabled, disabled, and scheduled from Home Assistant
+  or initially configured through environment variables
 
 ### Auto-Upgrade Configuration
 
@@ -157,18 +158,21 @@ AUTO_UPGRADE=false
 
 Or remove the environment variable entirely (defaults to enabled).
 
-### Home Assistant setting
+### Home Assistant settings
 
 Each device exposes an **Automatic Upgrades** switch in its Home Assistant
-configuration entities. Changing it takes effect immediately and is persisted
-to `.settings.json` in the agent configuration directory. After Home Assistant
-manages the switch for the first time, that stored value takes precedence over
-legacy `AUTO_UPGRADE` values from `.env` or launchd so it cannot silently
-revert after a restart.
+configuration entities, plus an **Upgrade Check Interval** number expressed in
+hours. The interval supports 0.25 through 168 hours in 0.25-hour (15-minute)
+increments. Changes take effect immediately and are persisted to
+`.settings.json` in the agent configuration directory. After Home Assistant
+manages either setting for the first time, that stored value takes precedence
+over the corresponding legacy `AUTO_UPGRADE` or `UPGRADE_CHECK_INTERVAL` value
+from `.env` or launchd so it cannot silently revert after a restart.
 
 Delete `.settings.json` and restart the agent to return control to the
-launchd/`.env` value. Turning **Automatic Upgrades** off stops future checks;
-it cannot cancel an installer already launched by a check in progress.
+launchd/`.env` values. Turning **Automatic Upgrades** off or changing the
+interval affects future checks; neither can cancel an installer already
+launched by a check in progress.
 
 ## Usage
 

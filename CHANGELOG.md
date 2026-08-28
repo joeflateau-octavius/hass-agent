@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Home Assistant **Automatic Upgrades** configuration switch that shows the
   effective per-device setting and safely persists ON/OFF changes.
+- Home Assistant **Upgrade Check Interval** configuration number that controls
+  each device's schedule from 15 minutes through 168 hours and applies changes
+  without restarting the agent.
 - Home Assistant MQTT button for Lock Screen using macOS's native
   `login.framework`, without AppleScript or Accessibility permission.
 - Home Assistant MQTT button for Sleep Display, backed by a device-scoped

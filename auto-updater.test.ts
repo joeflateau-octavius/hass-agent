@@ -141,20 +141,79 @@ describe("AutoUpdater", () => {
     vi.useRealTimers();
   });
 
-  it("does not create duplicate timers when enabled repeatedly", () => {
+  it("does not create duplicate timers when enabled repeatedly", async () => {
     vi.useFakeTimers();
     const mockChild = {
       stdout: { on: vi.fn() },
       stderr: { on: vi.fn() },
-      on: vi.fn(),
+      on: vi.fn((event, callback) => {
+        if (event === "close") callback(0);
+      }),
     };
     mockSpawn.mockReturnValue(mockChild);
 
     autoUpdater.start();
     autoUpdater.start();
+    await vi.advanceTimersByTimeAsync(0);
     vi.advanceTimersByTime(config.upgradeCheckInterval);
 
     expect(mockSpawn).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("reschedules future checks without checking immediately when interval changes", async () => {
+    vi.useFakeTimers();
+    mockSpawn.mockReturnValue({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn((event, callback) => {
+        if (event === "close") callback(0);
+      }),
+    });
+
+    autoUpdater.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+
+    autoUpdater.setCheckInterval(2000);
+    expect(autoUpdater.getCheckInterval()).toBe(2000);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1999);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("stores an interval change without starting checks while disabled", () => {
+    vi.useFakeTimers();
+    const updater = new AutoUpdater(
+      { ...config, autoUpgrade: false },
+      logger
+    );
+
+    updater.setCheckInterval(2000);
+    vi.advanceTimersByTime(4000);
+
+    expect(updater.getCheckInterval()).toBe(2000);
+    expect(mockSpawn).not.toHaveBeenCalled();
+    updater.stop();
+    vi.useRealTimers();
+  });
+
+  it("does not overlap upgrade checks", () => {
+    vi.useFakeTimers();
+    mockSpawn.mockReturnValue({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+    });
+
+    autoUpdater.start();
+    vi.advanceTimersByTime(config.upgradeCheckInterval * 2);
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 });
