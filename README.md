@@ -289,8 +289,9 @@ Each Mac automatically registers these MQTT buttons on its Home Assistant
 device:
 
 - **Lock Screen** — invokes macOS's native lock function through
-  `login.framework`; it does not require AppleScript or Accessibility
-  permission
+  `login.framework`; if an application has exclusively captured a display,
+  the agent activates Finder and confirms the owning application relinquishes
+  it first. This does not require AppleScript or Accessibility permission
 - **Sleep Display** — immediately sleeps the displays with `pmset`
 
 Commands are sent to the device-scoped topic
