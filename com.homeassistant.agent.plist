@@ -16,6 +16,8 @@
         <string>/tmp/hass-agent.log</string>
         <key>StandardErrorPath</key>
         <string>/tmp/hass-agent.error.log</string>
+        <key>WorkingDirectory</key>
+        <string>/Users/joeflateau/.config/hass-agent</string>
         <key>EnvironmentVariables</key>
         <dict>
             <key>MQTT_BROKER</key>

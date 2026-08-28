@@ -48,6 +48,14 @@ export interface MqttCommandDefinition {
   execute: () => Promise<void>;
 }
 
+export interface MqttSwitchDefinition {
+  id: string;
+  name: string;
+  icon?: string;
+  getState: () => boolean;
+  setState: (enabled: boolean) => Promise<void>;
+}
+
 interface MqttButtonConfig {
   name: string;
   unique_id: string;
@@ -56,6 +64,26 @@ interface MqttButtonConfig {
   availability_topic: string;
   payload_available: string;
   payload_not_available: string;
+  icon?: string;
+  device: DeviceConfig;
+}
+
+interface MqttSwitchConfig {
+  name: string;
+  unique_id: string;
+  state_topic: string;
+  command_topic: string;
+  payload_on: string;
+  payload_off: string;
+  state_on: string;
+  state_off: string;
+  availability_topic: string;
+  payload_available: string;
+  payload_not_available: string;
+  optimistic: false;
+  qos: 1;
+  retain: false;
+  entity_category: "config";
   icon?: string;
   device: DeviceConfig;
 }
@@ -80,6 +108,8 @@ export class MqttDeviceFramework {
   private commandTopic: string;
   private commandResultTopic: string;
   private commands = new Map<string, MqttCommandDefinition>();
+  private switches = new Map<string, MqttSwitchDefinition>();
+  private switchUpdates = new Map<string, Promise<void>>();
   private retiredCommandIds = new Set<string>();
 
   constructor(config: MqttConfig, logger: winston.Logger) {
@@ -165,6 +195,24 @@ export class MqttDeviceFramework {
     this.publishRetiredCommandDiscoveryConfigs();
   }
 
+  public registerSwitches(switches: MqttSwitchDefinition[]): void {
+    for (const definition of switches) {
+      if (!/^[a-z0-9_]+$/.test(definition.id)) {
+        throw new Error(`Invalid MQTT switch id: ${definition.id}`);
+      }
+      if (this.switches.has(definition.id)) {
+        throw new Error(`Duplicate MQTT switch id: ${definition.id}`);
+      }
+      this.switches.set(definition.id, definition);
+    }
+
+    this.publishSwitchDiscoveryConfigs();
+    this.publishSwitchStates();
+    if (this.client.connected) {
+      this.subscribeToSwitchTopics();
+    }
+  }
+
   public async connect(): Promise<void> {
     return new Promise((resolve) => {
       if (this.client.connected) {
@@ -175,6 +223,8 @@ export class MqttDeviceFramework {
           { qos: 1, retain: true }
         );
         this.subscribeToCommandTopic();
+        this.subscribeToSwitchTopics();
+        this.publishSwitchStates();
         resolve();
       } else {
         this.client.once("connect", () => {
@@ -229,7 +279,10 @@ export class MqttDeviceFramework {
         { qos: 1, retain: true }
       );
       this.publishCommandDiscoveryConfigs();
+      this.publishSwitchDiscoveryConfigs();
+      this.publishSwitchStates();
       this.subscribeToCommandTopic();
+      this.subscribeToSwitchTopics();
     });
 
     this.client.on("error", (error) => {
@@ -244,8 +297,8 @@ export class MqttDeviceFramework {
       this.logger.info("Reconnecting to MQTT broker...");
     });
 
-    this.client.on("message", (topic, payload) => {
-      void this.handleCommandMessage(topic, payload);
+    this.client.on("message", (topic, payload, packet) => {
+      void this.handleMessage(topic, payload, packet);
     });
   }
 
@@ -310,6 +363,50 @@ export class MqttDeviceFramework {
     }
   }
 
+  private publishSwitchDiscoveryConfigs(): void {
+    for (const definition of this.switches.values()) {
+      const config: MqttSwitchConfig = {
+        name: definition.name,
+        unique_id: `${this.deviceId}_${definition.id}`,
+        state_topic: this.getSwitchStateTopic(definition.id),
+        command_topic: this.getSwitchCommandTopic(definition.id),
+        payload_on: "ON",
+        payload_off: "OFF",
+        state_on: "ON",
+        state_off: "OFF",
+        availability_topic: `${DISCOVERY_PREFIX}/status/${this.deviceId}`,
+        payload_available: "online",
+        payload_not_available: "offline",
+        optimistic: false,
+        qos: 1,
+        retain: false,
+        entity_category: "config",
+        icon: definition.icon,
+        device: this.deviceConfig,
+      };
+
+      this.client.publish(
+        `${DISCOVERY_PREFIX}/switch/${this.deviceId}/${definition.id}/config`,
+        JSON.stringify(config),
+        { qos: 1, retain: true }
+      );
+    }
+  }
+
+  private publishSwitchStates(): void {
+    for (const definition of this.switches.values()) {
+      this.publishSwitchState(definition);
+    }
+  }
+
+  private publishSwitchState(definition: MqttSwitchDefinition): void {
+    this.client.publish(
+      this.getSwitchStateTopic(definition.id),
+      definition.getState() ? "ON" : "OFF",
+      { qos: 1, retain: true }
+    );
+  }
+
   private subscribeToCommandTopic(): void {
     if (!this.client.connected || this.commands.size === 0) {
       return;
@@ -329,14 +426,99 @@ export class MqttDeviceFramework {
     });
   }
 
-  private async handleCommandMessage(
-    topic: string,
-    payload: Buffer
-  ): Promise<void> {
-    if (topic !== this.commandTopic) {
+  private subscribeToSwitchTopics(): void {
+    if (!this.client.connected) {
       return;
     }
 
+    for (const definition of this.switches.values()) {
+      const topic = this.getSwitchCommandTopic(definition.id);
+      this.client.subscribe(topic, { qos: 1 }, (error) => {
+        if (error) {
+          this.logger.error(
+            `Failed to subscribe to MQTT switch topic ${topic}: ${error}`
+          );
+        }
+      });
+    }
+  }
+
+  private getSwitchStateTopic(switchId: string): string {
+    return `${COMMAND_PREFIX}/${this.deviceId}/switch/${switchId}/state`;
+  }
+
+  private getSwitchCommandTopic(switchId: string): string {
+    return `${COMMAND_PREFIX}/${this.deviceId}/switch/${switchId}/set`;
+  }
+
+  private async handleMessage(
+    topic: string,
+    payload: Buffer,
+    packet?: { retain?: boolean }
+  ): Promise<void> {
+    if (topic === this.commandTopic) {
+      if (packet?.retain) {
+        this.logger.warn(`Ignored retained MQTT command on ${topic}`);
+        return;
+      }
+      await this.handleCommandMessage(payload);
+      return;
+    }
+
+    const definition = [...this.switches.values()].find(
+      (candidate) => this.getSwitchCommandTopic(candidate.id) === topic
+    );
+    if (!definition) {
+      return;
+    }
+
+    if (packet?.retain) {
+      this.logger.warn(
+        `Ignored retained MQTT switch command for ${definition.id}`
+      );
+      this.publishSwitchState(definition);
+      return;
+    }
+
+    const requestedState = payload.toString("utf8");
+    if (requestedState !== "ON" && requestedState !== "OFF") {
+      this.logger.warn(
+        `Ignored invalid MQTT switch payload for ${definition.id}: ${requestedState}`
+      );
+      this.publishSwitchState(definition);
+      return;
+    }
+
+    const previousUpdate = this.switchUpdates.get(definition.id);
+    const update = (previousUpdate ?? Promise.resolve()).then(async () => {
+      try {
+        await definition.setState(requestedState === "ON");
+        this.logger.info(
+          `MQTT switch updated: ${definition.id}=${requestedState}`
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `MQTT switch update failed (${definition.id}): ${message}`
+        );
+      } finally {
+        this.publishSwitchState(definition);
+      }
+    });
+    this.switchUpdates.set(definition.id, update);
+
+    try {
+      await update;
+    } finally {
+      if (this.switchUpdates.get(definition.id) === update) {
+        this.switchUpdates.delete(definition.id);
+      }
+    }
+  }
+
+  private async handleCommandMessage(
+    payload: Buffer
+  ): Promise<void> {
     const commandId = payload.toString("utf8").trim();
     const command = this.commands.get(commandId);
     if (!command) {
