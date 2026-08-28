@@ -52,6 +52,7 @@ const {
     disconnect: vi.fn(),
     createDeviceEmitter: vi.fn(() => mockDeviceEmitter),
     registerCommands: vi.fn(),
+    registerSwitches: vi.fn(),
     retireCommands: vi.fn(),
   };
 
@@ -140,6 +141,7 @@ describe("MacOSPowerAgent", () => {
     mockMqttFramework.disconnect.mockClear();
     mockMqttFramework.createDeviceEmitter.mockClear();
     mockMqttFramework.registerCommands.mockClear();
+    mockMqttFramework.registerSwitches.mockClear();
     mockMqttFramework.retireCommands.mockClear();
     mockDeviceEmitter.publishState.mockClear();
   });
@@ -172,6 +174,15 @@ describe("MacOSPowerAgent", () => {
       ]);
       expect(mockMqttFramework.retireCommands).toHaveBeenCalledWith([
         "start_screensaver",
+      ]);
+      expect(mockMqttFramework.registerSwitches).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          icon: "mdi:update",
+          getState: expect.any(Function),
+          setState: expect.any(Function),
+        }),
       ]);
     });
 
@@ -285,6 +296,32 @@ describe("MacOSPowerAgent", () => {
   });
 
   describe("auto-upgrade", () => {
+    it("persists and applies Home Assistant switch changes", async () => {
+      const saved = Promise.withResolvers<void>();
+      const save = vi.fn(() => saved.promise);
+      const settingsStore = {
+        load: vi.fn(async (fallback: boolean) => fallback),
+        save,
+      };
+      agent = new MacOSPowerAgent(
+        { ...config, VERSION: "development" },
+        mockLogger,
+        settingsStore
+      );
+      const switchDefinition =
+        mockMqttFramework.registerSwitches.mock.calls.at(-1)?.[0]?.[0];
+
+      expect(switchDefinition.getState()).toBe(false);
+      const update = switchDefinition.setState(true);
+      await Promise.resolve();
+
+      expect(save).toHaveBeenCalledWith(true);
+      expect(switchDefinition.getState()).toBe(false);
+      saved.resolve();
+      await update;
+      expect(switchDefinition.getState()).toBe(true);
+    });
+
     it("should schedule upgrade check when enabled", async () => {
       const configWithUpgrade = {
         ...config,

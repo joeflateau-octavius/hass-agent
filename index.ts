@@ -18,6 +18,10 @@ import { join } from "path";
 import * as winston from "winston";
 import { z } from "zod";
 import { AutoUpdater, type AutoUpdaterConfig } from "./auto-updater.ts";
+import {
+  type AutoUpgradeSettingsStore,
+  FileAutoUpgradeSettingsStore,
+} from "./auto-upgrade-settings.ts";
 import { type BatteryInfo } from "./battery-parser.ts";
 import {
   BatteryStatusReader,
@@ -151,11 +155,18 @@ class MacOSPowerAgent {
   private lolEmitter: MqttDeviceEmitter<LoLGameStatus>;
   private lolLastInGameStatusEmitter: MqttDeviceEmitter<LoLGameStatus>;
   private autoUpdater: AutoUpdater;
+  private autoUpgradeSettings: AutoUpgradeSettingsStore;
   private isShuttingDown = false;
 
-  constructor(config: z.infer<typeof envSchema>, logger: winston.Logger) {
+  constructor(
+    config: z.infer<typeof envSchema>,
+    logger: winston.Logger,
+    autoUpgradeSettings: AutoUpgradeSettingsStore =
+      new FileAutoUpgradeSettingsStore()
+  ) {
     this.config = config;
     this.logger = logger;
+    this.autoUpgradeSettings = autoUpgradeSettings;
 
     // Initialize readers and emitter
     this.displayReader = new DisplayStatusReader(logger);
@@ -450,6 +461,19 @@ class MacOSPowerAgent {
     };
 
     this.autoUpdater = new AutoUpdater(autoUpdaterConfig, logger);
+    this.mqttFramework.registerSwitches([
+      {
+        id: "automatic_upgrades",
+        name: "Automatic Upgrades",
+        icon: "mdi:update",
+        getState: () => this.autoUpdater.isEnabled(),
+        setState: async (enabled) => {
+          await this.autoUpgradeSettings.save(enabled);
+          this.config.AUTO_UPGRADE = enabled;
+          this.autoUpdater.setEnabled(enabled);
+        },
+      },
+    ]);
 
     // Set up battery update callback
     this.batteryReader.setBatteryUpdateCallback((batteryInfo) => {
@@ -626,24 +650,35 @@ async function main() {
   // Continue with the main agent logic for 'run' command
   // Parse and validate environment variables
   let config: z.infer<typeof envSchema>;
+  const autoUpgradeSettings = new FileAutoUpgradeSettingsStore(
+    ".settings.json",
+    (message) => logger.error(message)
+  );
   try {
     const rawConfig = envSchema.parse(process.env);
+    const autoUpgrade = await autoUpgradeSettings.load(rawConfig.AUTO_UPGRADE);
     // Set default device name to computer name if not provided
     const deviceName = rawConfig.DEVICE_NAME || (await getComputerName());
-    config = { ...rawConfig, DEVICE_NAME: deviceName };
+    config = {
+      ...rawConfig,
+      AUTO_UPGRADE: autoUpgrade,
+      DEVICE_NAME: deviceName,
+    };
   } catch (error) {
     logger.error("❌ Environment variable validation failed:");
     if (error instanceof z.ZodError) {
       error.issues.forEach((err) => {
         logger.error(`  - ${err.path.join(".")}: ${err.message}`);
       });
+    } else {
+      logger.error(error instanceof Error ? error.message : String(error));
     }
     logger.error("\n💡 Please check your .env file or environment variables.");
     process.exit(1);
   }
 
   // Handle graceful shutdown
-  const agent = new MacOSPowerAgent(config, logger);
+  const agent = new MacOSPowerAgent(config, logger, autoUpgradeSettings);
   let isShuttingDown = false;
 
   const handleShutdown = async (signal: string) => {

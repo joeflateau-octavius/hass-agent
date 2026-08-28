@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Home Assistant **Automatic Upgrades** configuration switch that shows the
+  effective per-device setting and safely persists ON/OFF changes.
 - Home Assistant MQTT button for Lock Screen using macOS's native
   `login.framework`, without AppleScript or Accessibility permission.
 - Home Assistant MQTT button for Sleep Display, backed by a device-scoped
@@ -40,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restoring installed agents that previously relied on Bun's implicit loading.
 
 ### Security
+
+- Automatic-upgrade control accepts only exact MQTT `ON`/`OFF` payloads and
+  atomically stores the managed setting with user-only file permissions.
 
 ## [1.0.0] - 2025-01-31
 

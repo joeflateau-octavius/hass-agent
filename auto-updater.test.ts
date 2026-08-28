@@ -105,4 +105,56 @@ describe("AutoUpdater", () => {
 
     expect(true).toBe(true);
   });
+
+  it("enables upgrade checks immediately at runtime", async () => {
+    const updater = new AutoUpdater({ ...config, autoUpgrade: false }, logger);
+    const mockChild = {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+    };
+    mockSpawn.mockReturnValue(mockChild);
+
+    updater.setEnabled(true);
+    await Promise.resolve();
+
+    expect(updater.isEnabled()).toBe(true);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    updater.stop();
+  });
+
+  it("stops future upgrade checks when disabled at runtime", () => {
+    vi.useFakeTimers();
+    const mockChild = {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+    };
+    mockSpawn.mockReturnValue(mockChild);
+
+    autoUpdater.start();
+    autoUpdater.setEnabled(false);
+    vi.advanceTimersByTime(config.upgradeCheckInterval * 2);
+
+    expect(autoUpdater.isEnabled()).toBe(false);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("does not create duplicate timers when enabled repeatedly", () => {
+    vi.useFakeTimers();
+    const mockChild = {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+    };
+    mockSpawn.mockReturnValue(mockChild);
+
+    autoUpdater.start();
+    autoUpdater.start();
+    vi.advanceTimersByTime(config.upgradeCheckInterval);
+
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
 });

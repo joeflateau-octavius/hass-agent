@@ -349,6 +349,32 @@ describe("MqttDeviceFramework", () => {
       );
     });
 
+    it("ignores retained commands", async () => {
+      const execute = vi.fn(async () => {});
+      framework.registerCommands([
+        {
+          id: "lock_screen",
+          name: "Lock Screen",
+          execute,
+        },
+      ]);
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/command",
+        Buffer.from("lock_screen"),
+        { retain: true }
+      );
+      await Promise.resolve();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        "Ignored retained MQTT command on hass-agent/test-device/command"
+      );
+    });
+
     it("publishes failed command details without throwing", async () => {
       const execute = vi.fn(async () => {
         throw new Error("Accessibility permission denied");
@@ -451,6 +477,352 @@ describe("MqttDeviceFramework", () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(
         "Ignored unknown MQTT command: lock_screen"
       );
+    });
+  });
+
+  describe("registerSwitches", () => {
+    it("publishes a native Home Assistant configuration switch and state", () => {
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          icon: "mdi:update",
+          getState: () => true,
+          setState: vi.fn(async () => {}),
+        },
+      ]);
+
+      const discoveryCall = mockMqttClient.publish.mock.calls.find(
+        (call: any[]) =>
+          call[0] ===
+          "homeassistant/switch/test-device/automatic_upgrades/config"
+      );
+      expect(JSON.parse(discoveryCall![1])).toEqual(
+        expect.objectContaining({
+          name: "Automatic Upgrades",
+          unique_id: "test-device_automatic_upgrades",
+          state_topic:
+            "hass-agent/test-device/switch/automatic_upgrades/state",
+          command_topic:
+            "hass-agent/test-device/switch/automatic_upgrades/set",
+          payload_on: "ON",
+          payload_off: "OFF",
+          state_on: "ON",
+          state_off: "OFF",
+          optimistic: false,
+          qos: 1,
+          retain: false,
+          entity_category: "config",
+          icon: "mdi:update",
+          availability_topic: "homeassistant/status/test-device",
+          device: expect.objectContaining({ identifiers: ["test-device"] }),
+        })
+      );
+      expect(discoveryCall![2]).toEqual({ qos: 1, retain: true });
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/state",
+        "ON",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it("subscribes to exact device-scoped switch topics", () => {
+      mockMqttClient.connected = true;
+
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => false,
+          setState: vi.fn(async () => {}),
+        },
+      ]);
+
+      expect(mockMqttClient.subscribe).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        { qos: 1 },
+        expect.any(Function)
+      );
+    });
+
+    it("republishes switch discovery and effective state after reconnect", () => {
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => true,
+          setState: vi.fn(async () => {}),
+        },
+      ]);
+      mockMqttClient.publish.mockClear();
+      mockMqttClient.subscribe.mockClear();
+      const connectHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "connect"
+      )?.[1];
+
+      mockMqttClient.connected = true;
+      connectHandler?.();
+
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "homeassistant/switch/test-device/automatic_upgrades/config",
+        expect.any(String),
+        { qos: 1, retain: true }
+      );
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/state",
+        "ON",
+        { qos: 1, retain: true }
+      );
+      expect(mockMqttClient.subscribe).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        { qos: 1 },
+        expect.any(Function)
+      );
+    });
+
+    it("applies ON and republishes the effective state", async () => {
+      let enabled = false;
+      const updated = Promise.withResolvers<void>();
+      const setState = vi.fn(async (value: boolean) => {
+        enabled = value;
+        updated.resolve();
+      });
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => enabled,
+          setState,
+        },
+      ]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from("ON")
+      );
+      await updated.promise;
+      await Promise.resolve();
+
+      expect(setState).toHaveBeenCalledWith(true);
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/state",
+        "ON",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it("rejects payloads other than exact ON or OFF", async () => {
+      const setState = vi.fn(async () => {});
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => false,
+          setState,
+        },
+      ]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from("true; rm -rf /")
+      );
+      await Promise.resolve();
+
+      expect(setState).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        "Ignored invalid MQTT switch payload for automatic_upgrades: true; rm -rf /"
+      );
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/state",
+        "OFF",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it("rejects whitespace-padded switch payloads", async () => {
+      const setState = vi.fn(async () => {});
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => false,
+          setState,
+        },
+      ]);
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from(" ON ")
+      );
+      await Promise.resolve();
+
+      expect(setState).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        "Ignored invalid MQTT switch payload for automatic_upgrades:  ON "
+      );
+    });
+
+    it("rejects retained switch commands and republishes current state", async () => {
+      const setState = vi.fn(async () => {});
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => false,
+          setState,
+        },
+      ]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from("ON"),
+        { retain: true }
+      );
+      await Promise.resolve();
+
+      expect(setState).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        "Ignored retained MQTT switch command for automatic_upgrades"
+      );
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/state",
+        "OFF",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it("reverts HA to the effective state when persistence fails", async () => {
+      const setState = vi.fn(async () => {
+        throw new Error("settings file is read-only");
+      });
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => false,
+          setState,
+        },
+      ]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from("ON")
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "MQTT switch update failed (automatic_upgrades): settings file is read-only"
+      );
+      expect(mockMqttClient.publish).toHaveBeenCalledWith(
+        "hass-agent/test-device/switch/automatic_upgrades/state",
+        "OFF",
+        { qos: 1, retain: true }
+      );
+    });
+
+    it("serializes rapid changes so the last MQTT value wins", async () => {
+      let enabled = false;
+      const releaseFirst = Promise.withResolvers<void>();
+      const secondApplied = Promise.withResolvers<void>();
+      const states: boolean[] = [];
+      const setState = vi.fn(async (value: boolean) => {
+        states.push(value);
+        if (value) {
+          await releaseFirst.promise;
+        }
+        enabled = value;
+        if (!value) {
+          secondApplied.resolve();
+        }
+      });
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => enabled,
+          setState,
+        },
+      ]);
+      mockMqttClient.publish.mockClear();
+      const messageHandler = mockMqttClient.on.mock.calls.find(
+        (call: any[]) => call[0] === "message"
+      )?.[1];
+
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from("ON")
+      );
+      messageHandler?.(
+        "hass-agent/test-device/switch/automatic_upgrades/set",
+        Buffer.from("OFF")
+      );
+      await Promise.resolve();
+
+      expect(states).toEqual([true]);
+      releaseFirst.resolve();
+      await secondApplied.promise;
+      await Promise.resolve();
+
+      expect(states).toEqual([true, false]);
+      expect(enabled).toBe(false);
+      const stateCalls = mockMqttClient.publish.mock.calls.filter(
+        (call: any[]) =>
+          call[0] ===
+          "hass-agent/test-device/switch/automatic_upgrades/state"
+      );
+      expect(stateCalls.at(-1)?.[1]).toBe("OFF");
+    });
+
+    it("rejects invalid and duplicate switch ids", () => {
+      expect(() =>
+        framework.registerSwitches([
+          {
+            id: "automatic upgrades",
+            name: "Automatic Upgrades",
+            getState: () => false,
+            setState: vi.fn(async () => {}),
+          },
+        ])
+      ).toThrow("Invalid MQTT switch id");
+
+      framework.registerSwitches([
+        {
+          id: "automatic_upgrades",
+          name: "Automatic Upgrades",
+          getState: () => false,
+          setState: vi.fn(async () => {}),
+        },
+      ]);
+
+      expect(() =>
+        framework.registerSwitches([
+          {
+            id: "automatic_upgrades",
+            name: "Automatic Upgrades",
+            getState: () => false,
+            setState: vi.fn(async () => {}),
+          },
+        ])
+      ).toThrow("Duplicate MQTT switch id");
     });
   });
 

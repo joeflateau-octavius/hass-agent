@@ -27,7 +27,11 @@ export class AutoUpdater {
   }
 
   public start(): void {
-    if (!this.config.autoUpgrade || this.config.version === "development") {
+    if (
+      !this.config.autoUpgrade ||
+      this.config.version === "development" ||
+      this.upgradeCheckTimer
+    ) {
       return;
     }
 
@@ -38,6 +42,23 @@ export class AutoUpdater {
     if (this.upgradeCheckTimer) {
       clearInterval(this.upgradeCheckTimer);
       this.upgradeCheckTimer = undefined;
+    }
+  }
+
+  public isEnabled(): boolean {
+    return this.config.autoUpgrade;
+  }
+
+  public setEnabled(enabled: boolean): void {
+    if (this.config.autoUpgrade === enabled) {
+      return;
+    }
+
+    this.config.autoUpgrade = enabled;
+    if (enabled) {
+      this.start();
+    } else {
+      this.stop();
     }
   }
 

@@ -121,7 +121,10 @@ The agent includes built-in auto-upgrade functionality:
 - **Automatic Checks**: Periodically checks for new releases (default: every 3 hours)
 - **Smart Upgrades**: Uses a dedicated upgrade script that compares versions
 - **Zero-Downtime Updates**: Handles service stopping and restarting automatically
-- **Configurable**: Can be disabled or customized via environment variables
+- **Visible in Home Assistant**: Each device exposes an **Automatic Upgrades**
+  configuration switch showing the effective setting
+- **Configurable**: Can be disabled in Home Assistant or customized via
+  environment variables
 
 ### Auto-Upgrade Configuration
 
@@ -153,6 +156,19 @@ AUTO_UPGRADE=false
 ```
 
 Or remove the environment variable entirely (defaults to enabled).
+
+### Home Assistant setting
+
+Each device exposes an **Automatic Upgrades** switch in its Home Assistant
+configuration entities. Changing it takes effect immediately and is persisted
+to `.settings.json` in the agent configuration directory. After Home Assistant
+manages the switch for the first time, that stored value takes precedence over
+legacy `AUTO_UPGRADE` values from `.env` or launchd so it cannot silently
+revert after a restart.
+
+Delete `.settings.json` and restart the agent to return control to the
+launchd/`.env` value. Turning **Automatic Upgrades** off stops future checks;
+it cannot cancel an installer already launched by a check in progress.
 
 ## Usage
 
@@ -191,6 +207,8 @@ Create `~/Library/LaunchAgents/com.homeassistant.agent.plist`:
     <string>/tmp/hass-agent.log</string>
     <key>StandardErrorPath</key>
     <string>/tmp/hass-agent.error.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/your-username/.config/hass-agent</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>MQTT_BROKER</key>
@@ -301,6 +319,12 @@ commands or arguments.
 
 The **Last Command** diagnostic sensor records the command ID, success/error
 status, timestamp, and any error message.
+
+### Configuration
+
+- **Automatic Upgrades** — shows whether the device is checking for new
+  releases and enables or disables those checks. Enabling it starts a check
+  immediately, followed by the configured interval.
 
 ## League of Legends Integration
 
