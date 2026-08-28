@@ -8,10 +8,17 @@
 import { dlopen } from "node:ffi";
 import { spawn } from "child_process";
 import type { MqttCommandDefinition } from "./mqtt-emitter.ts";
+import {
+  releaseCapturedDisplayForLock,
+  verifyDisplayCaptureSupport,
+  type DisplayCaptureReleaseRequester,
+} from "./macos-display-capture.ts";
 
 export const RETIRED_MACOS_COMMAND_IDS = ["start_screensaver"] as const;
 export const LOGIN_FRAMEWORK_PATH =
   "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login";
+export const OPEN_APPLICATION_PATH = "/usr/bin/open";
+export const FINDER_BUNDLE_ID = "com.apple.finder";
 const LOGIN_FRAMEWORK_SYMBOLS = {
   SACLockScreenImmediate: {
     arguments: [],
@@ -25,6 +32,10 @@ export type ProcessRunner = (
 ) => Promise<void>;
 
 export type ScreenLocker = () => Promise<void>;
+export type NativeScreenLocker = () => void;
+export type DisplayCaptureReleaser = (
+  requestRelease: DisplayCaptureReleaseRequester
+) => Promise<void>;
 
 export async function runProcess(
   executable: string,
@@ -58,7 +69,7 @@ export async function runProcess(
   });
 }
 
-export async function lockScreen(): Promise<void> {
+function callNativeLockScreen(): void {
   const { lib, functions } = dlopen(
     LOGIN_FRAMEWORK_PATH,
     LOGIN_FRAMEWORK_SYMBOLS
@@ -74,6 +85,18 @@ export async function lockScreen(): Promise<void> {
   }
 }
 
+export async function lockScreen(
+  runner: ProcessRunner = runProcess,
+  releaseDisplayCapture: DisplayCaptureReleaser =
+    releaseCapturedDisplayForLock,
+  nativeScreenLocker: NativeScreenLocker = callNativeLockScreen
+): Promise<void> {
+  await releaseDisplayCapture(() =>
+    runner(OPEN_APPLICATION_PATH, ["-b", FINDER_BUNDLE_ID])
+  );
+  nativeScreenLocker();
+}
+
 /**
  * Verify that the private macOS lock function is still available without
  * invoking it (which would lock the test runner).
@@ -81,11 +104,12 @@ export async function lockScreen(): Promise<void> {
 export function verifyLockScreenSupport(): void {
   const { lib } = dlopen(LOGIN_FRAMEWORK_PATH, LOGIN_FRAMEWORK_SYMBOLS);
   lib.close();
+  verifyDisplayCaptureSupport();
 }
 
 export function createMacOSCommands(
   runner: ProcessRunner = runProcess,
-  screenLocker: ScreenLocker = lockScreen
+  screenLocker: ScreenLocker = () => lockScreen(runner)
 ): MqttCommandDefinition[] {
   return [
     {
