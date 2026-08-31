@@ -313,7 +313,13 @@ device:
 - **Lock Screen** — invokes macOS's native lock function through
   `login.framework`; if an application has exclusively captured a display,
   the agent activates Finder and confirms the owning application relinquishes
-  it first. This does not require AppleScript or Accessibility permission
+  it first. If League of Legends keeps its true-fullscreen capture, the agent
+  requires a single foreground process from the verified Riot game bundle and
+  a fresh Game Client API response. It then terminates that exact PID, with a
+  PID/start-time/path recheck before any forced termination, while leaving Riot
+  Client and League Client UX running. The agent verifies that WindowServer
+  released the display before locking. This does not require AppleScript or
+  Accessibility permission
 - **Sleep Display** — immediately sleeps the displays with `pmset`
 
 Commands are sent to the device-scoped topic
