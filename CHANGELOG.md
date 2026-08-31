@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exclusive macOS display capture before invoking Lock Screen, preventing
   fullscreen games from blocking the login window while the native lock API
   reports success.
+- When League of Legends retains exclusive display capture after Finder is
+  activated, identify one foreground in-game process through its Riot bundle,
+  owner UID, executable path, start time, and a fresh Game Client API probe;
+  signal only that PID, revalidate it before any `SIGKILL`, verify capture
+  release, and then lock while leaving Riot and League client UX running.
 - Explicitly ad-hoc sign and verify macOS release executables before
   publishing, preventing `OS_REASON_CODESIGNING` launch failures.
 - Load the existing `.env` configuration with Node's native dotenv parser,

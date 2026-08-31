@@ -17,6 +17,25 @@ const CORE_GRAPHICS_SYMBOLS = {
 export const DISPLAY_CAPTURE_RELEASE_TIMEOUT_MS = 5_000;
 export const DISPLAY_CAPTURE_POLL_INTERVAL_MS = 50;
 
+export type DisplayCaptureReleaseOptions = {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  requestDescription?: string;
+  beforeRequest?: () => Promise<void>;
+};
+
+export class DisplayCaptureReleaseTimeoutError extends Error {
+  public constructor(
+    public readonly timeoutMs: number,
+    public readonly requestDescription: string
+  ) {
+    super(
+      `Display remained captured ${timeoutMs}ms after ${requestDescription}`
+    );
+    this.name = "DisplayCaptureReleaseTimeoutError";
+  }
+}
+
 export type DisplayCaptureProbe = () => boolean;
 export type DisplayCaptureReleaseRequester = () => Promise<void>;
 export type Delay = (milliseconds: number) => Promise<void>;
@@ -101,16 +120,34 @@ export function isAnyDisplayCaptured(
  */
 export async function releaseCapturedDisplayForLock(
   requestRelease: DisplayCaptureReleaseRequester,
+  options: DisplayCaptureReleaseOptions = {},
   isCaptured: DisplayCaptureProbe = isAnyDisplayCaptured,
-  wait: Delay = delay,
-  timeoutMs = DISPLAY_CAPTURE_RELEASE_TIMEOUT_MS,
-  pollIntervalMs = DISPLAY_CAPTURE_POLL_INTERVAL_MS
+  wait: Delay = delay
 ): Promise<void> {
+  const {
+    timeoutMs = DISPLAY_CAPTURE_RELEASE_TIMEOUT_MS,
+    pollIntervalMs = DISPLAY_CAPTURE_POLL_INTERVAL_MS,
+    requestDescription = "requesting release",
+    beforeRequest,
+  } = options;
+
   if (!isCaptured()) {
     return;
   }
 
-  await requestRelease();
+  await beforeRequest?.();
+
+  try {
+    await requestRelease();
+  } catch (error) {
+    // The owning application can release capture between the probe and the
+    // request (for example, while quitting). The lock goal is already met in
+    // that race, so only propagate the request failure if capture persists.
+    if (!isCaptured()) {
+      return;
+    }
+    throw error;
+  }
 
   const pollCount = Math.ceil(timeoutMs / pollIntervalMs);
   for (let poll = 0; poll <= pollCount; poll += 1) {
@@ -123,8 +160,9 @@ export async function releaseCapturedDisplayForLock(
     }
   }
 
-  throw new Error(
-    `Display remained captured ${timeoutMs}ms after activating Finder`
+  throw new DisplayCaptureReleaseTimeoutError(
+    timeoutMs,
+    requestDescription
   );
 }
 

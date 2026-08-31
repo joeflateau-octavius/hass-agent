@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DisplayCaptureReleaseTimeoutError,
   isAnyDisplayCaptured,
   releaseCapturedDisplayForLock,
   type CoreGraphicsFunctions,
@@ -143,6 +144,7 @@ describe("releaseCapturedDisplayForLock", () => {
 
     await releaseCapturedDisplayForLock(
       requestRelease,
+      {},
       isCaptured,
       wait
     );
@@ -162,16 +164,38 @@ describe("releaseCapturedDisplayForLock", () => {
 
     await releaseCapturedDisplayForLock(
       requestRelease,
+      { timeoutMs: 100, pollIntervalMs: 50 },
       isCaptured,
-      wait,
-      100,
-      50
+      wait
     );
 
     expect(requestRelease).toHaveBeenCalledTimes(1);
     expect(isCaptured).toHaveBeenCalledTimes(3);
     expect(wait).toHaveBeenCalledTimes(1);
     expect(wait).toHaveBeenCalledWith(50);
+  });
+
+  it("runs the pre-request snapshot only after capture is detected", async () => {
+    const beforeRequest = vi.fn(async () => {});
+    const requestRelease = vi.fn(async () => {});
+
+    await releaseCapturedDisplayForLock(
+      requestRelease,
+      { beforeRequest },
+      () => false
+    );
+    expect(beforeRequest).not.toHaveBeenCalled();
+
+    const captureStates = [true, false];
+    await releaseCapturedDisplayForLock(
+      requestRelease,
+      { beforeRequest },
+      () => captureStates.shift() ?? false
+    );
+    expect(beforeRequest).toHaveBeenCalledTimes(1);
+    expect(beforeRequest.mock.invocationCallOrder[0] ?? Infinity).toBeLessThan(
+      requestRelease.mock.invocationCallOrder[0] ?? -Infinity
+    );
   });
 
   it("fails instead of reporting a false lock success when capture persists", async () => {
@@ -182,13 +206,16 @@ describe("releaseCapturedDisplayForLock", () => {
     await expect(
       releaseCapturedDisplayForLock(
         requestRelease,
+        {
+          timeoutMs: 100,
+          pollIntervalMs: 50,
+          requestDescription: "activating Finder",
+        },
         isCaptured,
-        wait,
-        100,
-        50
+        wait
       )
-    ).rejects.toThrow(
-      "Display remained captured 100ms after activating Finder"
+    ).rejects.toEqual(
+      new DisplayCaptureReleaseTimeoutError(100, "activating Finder")
     );
 
     expect(requestRelease).toHaveBeenCalledTimes(1);
@@ -204,9 +231,36 @@ describe("releaseCapturedDisplayForLock", () => {
     const wait = vi.fn<Delay>(async () => {});
 
     await expect(
-      releaseCapturedDisplayForLock(requestRelease, isCaptured, wait)
+      releaseCapturedDisplayForLock(
+        requestRelease,
+        {},
+        isCaptured,
+        wait
+      )
     ).rejects.toThrow("Finder activation failed");
 
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("accepts a request failure when capture cleared concurrently", async () => {
+    const requestRelease = vi.fn(async () => {
+      throw new Error("No matching process");
+    });
+    const captureStates = [true, false];
+    const isCaptured = vi.fn(
+      () => captureStates.shift() ?? false
+    );
+    const wait = vi.fn<Delay>(async () => {});
+
+    await releaseCapturedDisplayForLock(
+      requestRelease,
+      {},
+      isCaptured,
+      wait
+    );
+
+    expect(requestRelease).toHaveBeenCalledTimes(1);
+    expect(isCaptured).toHaveBeenCalledTimes(2);
     expect(wait).not.toHaveBeenCalled();
   });
 });
